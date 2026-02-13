@@ -14,7 +14,7 @@ from http import HTTPStatus
 import uuid 
 
 # ==========================================
-# 0. 配置区 (已脱敏：从 Streamlit Secrets 读取)
+# 0. 配置区 (从 Secrets 读取)
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
@@ -24,9 +24,6 @@ except:
     GOOGLE_API_KEY = ""
     ALI_API_KEY = ""
     ZHIPU_API_KEY = ""
-
-BUFFER_LOGISTICS_URL = "https://publish.buffer.com/profile/你的物流ID"
-BUFFER_HOUSE_URL = "https://publish.buffer.com/profile/你的房屋ID"
 
 # ==========================================
 # 1. 业务大脑
@@ -40,7 +37,7 @@ BIZ_CONFIG = {
         "phone": "+86 13780685000",
         "keywords": "international logistics, ddp shipping, sea freight, air cargo",
         "context": "We provide reliable international shipping services, focusing on DDP.",
-        "buffer_url": BUFFER_LOGISTICS_URL
+        "buffer_url": "https://publish.buffer.com/profile/你的物流ID"
     },
     "house": {
         "name": "WelluckyHouse",
@@ -50,7 +47,7 @@ BIZ_CONFIG = {
         "phone": "+86 18615329580",
         "keywords": "expandable container house, folding house, apple cabin",
         "context": "We manufacture high-quality expandable container houses.",
-        "buffer_url": BUFFER_HOUSE_URL
+        "buffer_url": "https://publish.buffer.com/profile/你的房屋ID"
     }
 }
 
@@ -74,7 +71,7 @@ def convert_image(image, quality=80):
     return img_byte_arr.getvalue()
 
 # ==========================================
-# 3. 图像处理 (实时预览核心)
+# 3. 图像处理 (支持 3 标题独立参数)
 # ==========================================
 def load_font_safe(size):
     try: return ImageFont.truetype("impact.ttf", size)
@@ -87,6 +84,7 @@ def apply_youtube_style(image, text_configs):
     image = enhancer.enhance(1.2)
     W, H = image.size
     draw = ImageDraw.Draw(image)
+    
     lines_to_draw = []
     total_block_height = 0
     for cfg in text_configs:
@@ -108,131 +106,157 @@ def apply_youtube_style(image, text_configs):
     return image
 
 # ==========================================
-# 4. AI 引擎 (整合 SEO/GEO 逻辑)
+# 4. AI 引擎
 # ==========================================
+def generate_ai_cover(prompt, ratio, api_key):
+    dashscope.api_key = api_key
+    size = "1280*720" if ratio == "16:9" else "720*1280"
+    try:
+        rsp = ImageSynthesis.call(model=ImageSynthesis.Models.wanx_v1, prompt=f"Professional logistics photography, 4k, {prompt}", n=1, size=size)
+        if rsp.status_code == HTTPStatus.OK:
+            return Image.open(io.BytesIO(requests.get(rsp.output.results[0].url).content))
+    except: return None
+
 def get_prompt(info, platform, user_draft, link, task_type):
     contact = f"Web: {info['website']}, WhatsApp: {info['phone']}"
     if task_type == "content":
-        return f"Role: Social Media Manager for {info['full_name']}. Platform: {platform}. Draft: {user_draft}. Link: {link}. Contact: {contact}. Rules: Professional, Max 2 emojis, NO markdown."
+        return f"Role: Social Media Manager for {info['full_name']}. Draft: {user_draft}. Link: {link}. Contact: {contact}."
     elif task_type == "geo":
-        return f"Role: Senior SEO & GEO Specialist. Task: Translate or Refine into professional, authoritative English. Target: Enhance EEAT (Expertise, Authoritativeness, Trustworthiness). Provide content and a JSON-LD FAQ Schema. Content: {user_draft}"
+        return f"Role: Senior SEO & GEO Specialist. Task: Translate/Refine to authoritative English. Enhance EEAT. Provide Article and JSON-LD FAQ Schema. Content: {user_draft}"
     else:
-        return f"Task: Google SEO filename for {info['keywords']}. Rule: Lowercase, hyphens only, include brand '{info['name'].lower()}'."
+        return f"Task: Google SEO filename for {info['keywords']}. Include '{info['name'].lower()}'."
 
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
     if engine == "zhipu":
-        try:
-            client = ZhipuAI(api_key=api_key)
-            res = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}])
-            return clean_text(res.choices[0].message.content)
-        except Exception as e: return f"智谱错误: {e}"
+        client = ZhipuAI(api_key=api_key)
+        res = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}])
+        return clean_text(res.choices[0].message.content)
     elif engine == "google":
-        try:
-            genai.configure(api_key=api_key)
-            m = genai.GenerativeModel(model)
-            img = image_obj_or_path if not isinstance(image_obj_or_path, str) else Image.open(image_obj_or_path)
-            res = m.generate_content([prompt, img] if img else [prompt])
-            return clean_text(res.text)
-        except Exception as e: return f"Google错误: {e}"
+        genai.configure(api_key=api_key)
+        m = genai.GenerativeModel(model)
+        img = image_obj_or_path if not isinstance(image_obj_or_path, str) else Image.open(image_obj_or_path)
+        res = m.generate_content([prompt, img] if img else [prompt])
+        return clean_text(res.text)
     else:
-        try:
-            dashscope.api_key = api_key
-            if not os.path.exists("temp"): os.makedirs("temp")
-            path = os.path.join("temp", f"{uuid.uuid4().hex}.png")
-            if image_obj_or_path:
-                (image_obj_or_path if not isinstance(image_obj_or_path, str) else Image.open(image_obj_or_path)).save(path)
-                file_url = f"file://{os.path.abspath(path).replace('\\', '/')}"
-                msgs = [{"role": "user", "content": [{"image": file_url}, {"text": prompt}]}]
-                res = MultiModalConversation.call(model=model, messages=msgs)
-                os.remove(path)
-                return clean_text(res.output.choices[0].message.content[0]['text']) if res.status_code == HTTPStatus.OK else res.message
-            else:
-                # 纯文本处理
-                from dashscope import Generation
-                res = Generation.call(model="qwen-max", prompt=prompt)
-                return clean_text(res.output.text) if res.status_code == HTTPStatus.OK else res.message
-        except Exception as e: return f"阿里错误: {e}"
+        dashscope.api_key = api_key
+        if image_obj_or_path:
+            path = f"temp_{uuid.uuid4().hex}.png"
+            (image_obj_or_path if not isinstance(image_obj_or_path, str) else Image.open(image_obj_or_path)).save(path)
+            file_url = f"file://{os.path.abspath(path).replace('\\', '/')}"
+            msgs = [{"role": "user", "content": [{"image": file_url}, {"text": prompt}]}]
+            res = MultiModalConversation.call(model=model, messages=msgs)
+            os.remove(path)
+            return clean_text(res.output.choices[0].message.content[0]['text']) if res.status_code == HTTPStatus.OK else "Error"
+        else:
+            from dashscope import Generation
+            res = Generation.call(model="qwen-max", prompt=prompt)
+            return clean_text(res.output.text)
 
 # ==========================================
-# 5. 页面布局 V20.0 (支持 GEO 专家)
+# 5. UI 布局 (全功能回归)
 # ==========================================
-st.set_page_config(page_title="VastLog & Wellucky 营销大脑", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="狮子营销大脑", layout="wide", page_icon="🦁")
+
+if 'results' not in st.session_state: st.session_state.results = []
+if 'edited_cover' not in st.session_state: st.session_state.edited_cover = None
 
 with st.sidebar:
     st.header("1. 配置")
-    engine_choice = st.radio("文案引擎", ("Google Gemini", "阿里通义", "智谱清言 (GLM)"), key="eng_radio")
+    engine_choice = st.radio("文案引擎", ("Google Gemini", "阿里通义", "智谱清言 (GLM)"))
     if "Google" in engine_choice:
         eng_type, mod_list, cur_key = "google", ["gemini-1.5-flash", "gemini-1.5-pro"], GOOGLE_API_KEY
     elif "阿里" in engine_choice:
         eng_type, mod_list, cur_key = "ali", ["qwen-vl-max", "qwen-max"], ALI_API_KEY
     else:
         eng_type, mod_list, cur_key = "zhipu", ["glm-4v", "glm-4-plus", "glm-4-flash"], ZHIPU_API_KEY
-    
-    sel_mod = st.selectbox("选择模型", mod_list, key="mod_select")
+    sel_mod = st.selectbox("选择模型", mod_list)
     st.divider()
-    biz_sel = st.radio("模式", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), key="biz_radio")
+    biz_sel = st.radio("模式", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"))
     cur_biz = "logistics" if "VastLog" in biz_sel else "house"
     cur_info = BIZ_CONFIG[cur_biz]
     platform = st.selectbox("发布平台", ["Facebook", "LinkedIn", "YouTube", "TikTok"])
 
-st.title(f"🦁 {cur_info['name']} 数字化营销中心")
+st.title(f"🦁 {cur_info['name']} 数字化中心")
 
 tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 SEO/GEO 深度优化"])
 
-# --- Tab 1: 智能文案 ---
+# --- Tab 1: 回归“仅处理图片”和“全套处理” ---
 with tab1:
     c1, c2 = st.columns(2)
     u_files = c1.file_uploader("📂 上传素材", accept_multiple_files=True)
-    draft = c2.text_area("📝 描述", placeholder="AI 自动写文案...")
-    if st.button("🚀 批量处理", type="primary") and u_files:
+    draft = c2.text_area("📝 描述 (选填)", placeholder="AI 自动写文案...")
+    
+    b1, b2 = st.columns(2)
+    btn_img = b1.button("🖼️ 仅处理图片 (快)", use_container_width=True)
+    btn_all = b2.button("🚀 全套处理 (写文案)", type="primary", use_container_width=True)
+    
+    if (btn_img or btn_all) and u_files:
         st.session_state.results = []
         link = generate_utm(cur_info['website'], platform, cur_biz)
         for f in u_files:
             img = Image.open(f)
             name = run_text_engine(eng_type, img, get_prompt(cur_info, platform, "", "", "name"), cur_key, sel_mod)
             name = f"{cur_info['name'].lower()}-{uuid.uuid4().hex[:5]}.webp" if not name or len(name)>50 else name+".webp"
-            text = run_text_engine(eng_type, img, get_prompt(cur_info, platform, draft, link, "content"), cur_key, sel_mod)
+            text = run_text_engine(eng_type, img, get_prompt(cur_info, platform, draft, link, "content"), cur_key, sel_mod) if btn_all else ""
             st.session_state.results.append({"img": img, "name": name, "data": convert_image(img), "text": text})
-        st.success("处理完成！")
     
-    if 'results' in st.session_state:
+    if st.session_state.results:
         for res in st.session_state.results:
-            col_l, col_r = st.columns([1, 2])
-            col_l.image(res['img'], use_container_width=True)
-            col_r.code(res['name'])
-            col_r.text_area("文案", res['text'], height=150)
-            col_r.download_button("下载图片", res['data'], res['name'])
+            l, r = st.columns([1, 2])
+            l.image(res['img'], use_container_width=True)
+            r.code(res['name'])
+            if res['text']: r.text_area("文案", res['text'], height=150)
+            r.download_button(f"下载 {res['name']}", res['data'], res['name'])
 
-# --- Tab 2: 封面工厂 ---
+# --- Tab 2: 回归 3 标题控制 + AI 画图 ---
 with tab2:
-    st.subheader("🛠️ YouTube 视频封面制作")
-    u_cover = st.file_uploader("上传背景图", type=['jpg', 'png'])
-    if u_cover:
-        t_img = Image.open(u_cover)
-        col_c, col_p = st.columns([1, 2])
-        txt1 = col_c.text_input("标题 1", "TOP QUALITY")
-        txt2 = col_c.text_input("标题 2", "CONTAINER HOUSE")
-        color = col_c.color_picker("文字颜色", "#FFDD00")
-        conf = [{'text': txt1, 'color': color, 'size': 0.15}, {'text': txt2, 'color': '#FFFFFF', 'size': 0.1}]
-        prev_img = apply_youtube_style(t_img.copy(), conf)
-        col_p.image(prev_img, use_container_width=True)
-        buf = io.BytesIO()
-        prev_img.save(buf, format="PNG")
-        col_p.download_button("保存封面", buf.getvalue(), "cover.png")
+    st.subheader("🛠️ YouTube 封面工厂")
+    mode = st.radio("来源", ("📤 上传背景", "🎨 AI 画图"), horizontal=True)
+    t_img = None
+    if "上传" in mode:
+        u_c = st.file_uploader("上传图", type=['jpg','png'])
+        if u_c: t_img = Image.open(u_c)
+    else:
+        c_p, c_r = st.columns([3, 1])
+        prompt = c_p.text_input("画面描述")
+        ratio = c_r.selectbox("比例", ["16:9", "9:16"])
+        if st.button("✨ 开始画图"):
+            with st.spinner("AI 绘画中..."):
+                t_img = generate_ai_cover(prompt, ratio, ALI_API_KEY)
+                st.session_state.edited_cover = t_img
+    
+    if st.session_state.edited_cover or t_img:
+        work_img = st.session_state.edited_cover if st.session_state.edited_cover else t_img
+        ctrl, prev = st.columns([1, 2])
+        with ctrl:
+            st.markdown("##### 标题 1")
+            v1 = st.text_input("内容 1", "TOP SELLING")
+            c1, s1 = st.columns(2)
+            col1 = c1.color_picker("颜色 1", "#FFFFFF")
+            siz1 = s1.slider("大小 1", 0.05, 0.4, 0.1)
+            st.markdown("##### 标题 2")
+            v2 = st.text_input("内容 2", "CONTAINER HOUSE")
+            c2, s2 = st.columns(2)
+            col2 = c2.color_picker("颜色 2", "#FFDD00")
+            siz2 = s2.slider("大小 2", 0.05, 0.4, 0.15)
+            st.markdown("##### 标题 3")
+            v3 = st.text_input("内容 3", "FACTORY PRICE")
+            c3, s3 = st.columns(2)
+            col3 = c3.color_picker("颜色 3", "#FF0000")
+            siz3 = s3.slider("大小 3", 0.05, 0.4, 0.1)
+        
+        configs = [{'text':v1,'color':col1,'size':siz1},{'text':v2,'color':col2,'size':siz2},{'text':v3,'color':col3,'size':siz3}]
+        out_img = apply_youtube_style(work_img.copy(), configs)
+        prev.image(out_img, use_container_width=True)
+        b = io.BytesIO()
+        out_img.save(b, format="PNG")
+        prev.download_button("⬇️ 下载封面", b.getvalue(), "cover.png", type="primary")
 
-# --- Tab 3: SEO/GEO 深度优化 (新功能!) ---
+# --- Tab 3: SEO/GEO 深度优化 ---
 with tab3:
     st.subheader("🌍 内容深度加工 (中译英 + EEAT + Schema)")
-    raw_text = st.text_area("粘贴你的中文草稿或原始英文", height=250, placeholder="例如：我们今天发货了，包装非常专业...")
-    
-    if st.button("✨ 执行深度优化", type="primary"):
-        if raw_text:
-            geo_prompt = get_prompt(cur_info, "", raw_text, "", "geo")
-            with st.spinner("专家正在润色并生成 Schema..."):
-                # 这里不传图片，只传文本
-                refined_content = run_text_engine(eng_type, None, geo_prompt, cur_key, sel_mod)
-                st.markdown("### 💎 优化后的权威文案")
-                st.info("此文案已根据 EEAT 准则润色，适合直接发布在官网。")
-                st.write(refined_content)
-        else:
-            st.warning("请先输入内容")
+    raw = st.text_area("粘贴中文发货实录或英文草稿", height=250)
+    if st.button("✨ 执行深度优化", type="primary") and raw:
+        res = run_text_engine(eng_type, None, get_prompt(cur_info, "", raw, "", "geo"), cur_key, sel_mod)
+        st.markdown("### 💎 优化结果")
+        st.write(res)
