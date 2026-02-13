@@ -1,7 +1,7 @@
+from zhipuai import ZhipuAI
 import streamlit as st
 import google.generativeai as genai
 import dashscope 
-from zhipuai import ZhipuAI
 from dashscope import MultiModalConversation, ImageSynthesis 
 from PIL import Image, ImageEnhance, ImageDraw, ImageFont
 import io
@@ -171,39 +171,62 @@ def get_prompt(info, platform, user_draft, link, task_type):
         Keywords: {info['keywords']}
         Rule: Lowercase, hyphens only, include brand '{info['name'].lower()}', no extension.
         """
-
+# 2. 完整替换这个函数
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
+    """核心文案生成引擎 - 支持 Google, 阿里, 智谱"""
+    
+    # === 智谱清言 (Zhipu) 分支 ===
     if engine == "zhipu":
-        client = ZhipuAI(api_key=api_key)
-        # 如果需要识图，智谱用 glm-4v 模型；如果只是写文案，用普通 glm-4
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return clean_text(response.choices[0].message.content)
-    if engine == "google":
-        genai.configure(api_key=api_key)
-        m = genai.GenerativeModel(model)
-        if isinstance(image_obj_or_path, str): img = Image.open(image_obj_or_path)
-        else: img = image_obj_or_path
-        res = m.generate_content([prompt, img])
-        return clean_text(res.text)
+        try:
+            client = ZhipuAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return clean_text(response.choices[0].message.content)
+        except Exception as e:
+            return f"智谱引擎错误: {str(e)}"
+
+    # === Google Gemini 分支 ===
+    elif engine == "google":
+        try:
+            genai.configure(api_key=api_key)
+            m = genai.GenerativeModel(model)
+            if isinstance(image_obj_or_path, str): 
+                img = Image.open(image_obj_or_path)
+            else: 
+                img = image_obj_or_path
+            res = m.generate_content([prompt, img])
+            return clean_text(res.text)
+        except Exception as e:
+            return f"Google引擎错误: {str(e)}"
+
+    # === 阿里通义 (Ali) 分支 ===
     else:
-        dashscope.api_key = api_key
-        if not os.path.exists("temp"): os.makedirs("temp")
-        safe_name = f"img_{uuid.uuid4().hex[:8]}.png"
-        safe_path = os.path.join("temp", safe_name)
-        if not isinstance(image_obj_or_path, str): image_obj_or_path.save(safe_path)
-        else: Image.open(image_obj_or_path).save(safe_path)
-        abs_path = os.path.abspath(safe_path).replace("\\", "/")
-        file_url = f"file://{abs_path}"
-        msgs = [{"role": "user", "content": [{"image": file_url}, {"text": prompt}]}]
-        res = MultiModalConversation.call(model=model, messages=msgs)
-        try: os.remove(safe_path)
-        except: pass
-        if res.status_code == HTTPStatus.OK:
-            return clean_text(res.output.choices[0].message.content[0]['text'])
-        return f"Error: {res.message}"
+        try:
+            dashscope.api_key = api_key
+            if not os.path.exists("temp"): os.makedirs("temp")
+            safe_name = f"img_{uuid.uuid4().hex[:8]}.png"
+            safe_path = os.path.join("temp", safe_name)
+            
+            if not isinstance(image_obj_or_path, str): 
+                image_obj_or_path.save(safe_path)
+            else: 
+                Image.open(image_obj_or_path).save(safe_path)
+                
+            abs_path = os.path.abspath(safe_path).replace("\\", "/")
+            file_url = f"file://{abs_path}"
+            msgs = [{"role": "user", "content": [{"image": file_url}, {"text": prompt}]}]
+            res = MultiModalConversation.call(model=model, messages=msgs)
+            
+            try: os.remove(safe_path)
+            except: pass
+            
+            if res.status_code == HTTPStatus.OK:
+                return clean_text(res.output.choices[0].message.content[0]['text'])
+            return f"阿里引擎错误: {res.message}"
+        except Exception as e:
+            return f"系统处理错误: {str(e)}"
 
 # ==========================================
 # 5. 页面布局 V18.0 (实时预览版)
@@ -384,4 +407,5 @@ with tab2:
             preview_img.save(buf, format="PNG")
 
             st.download_button("⬇️ 下载这张封面", buf.getvalue(), "cover.png", "image/png", type="primary", use_container_width=True)
+
 
