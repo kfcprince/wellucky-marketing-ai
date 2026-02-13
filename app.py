@@ -140,7 +140,7 @@ def get_prompt(info, platform, user_draft, link, task_type):
         2. **HTML Layout**: Output the content in ONE single <div> block with:
            - Container: max-width 900px, font-family Arial, line-height 1.6.
            - Headings: Use <h2> with a blue left border (5px solid #0056b3) and 15px padding-left.
-           - Images: If images are described, leave a placeholder <img src='IMAGE_URL' style='width:100%; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.1); margin-bottom:15px;'>.
+           - Images: If images are mentioned, wrap them in: <img src='IMAGE_URL' alt='[Describe the image with SEO keywords here]' style='width:100%; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.1); margin-bottom:15px;'>.
            - Structure: Use <p> for paragraphs and <ul>/<li> for features/benefits.
         3. **Schema**: At the very end, provide a JSON-LD FAQ Schema code block separately.
 
@@ -309,3 +309,4 @@ with tab3:
                     st.caption("提示：点击右上角复制按钮，粘贴到网站后台的 HTML/源码模式下。")
         else:
             st.warning("请先输入内容")
+
