@@ -16,13 +16,41 @@ if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
 if 'seo_metadata' not in st.session_state: st.session_state.seo_metadata = {}
 
-# 读取 API Keys
-try:
-    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
-    ALI_API_KEY = st.secrets.get("ALI_API_KEY", "")
-    ZHIPU_API_KEY = st.secrets.get("ZHIPU_API_KEY", "")
-except:
-    GOOGLE_API_KEY = ALI_API_KEY = ZHIPU_API_KEY = ""
+# ==========================================
+# Streamlit Cloud Secrets 读取（增强版）
+# ==========================================
+def get_secret_safe(key_name, default=""):
+    """安全读取Streamlit Secrets"""
+    try:
+        # 方法1：直接访问（Streamlit Cloud推荐）
+        if key_name in st.secrets:
+            value = st.secrets[key_name]
+            if value and len(value) > 0:
+                return value
+        
+        # 方法2：用get方法
+        value = st.secrets.get(key_name, default)
+        if value and len(value) > 0:
+            return value
+        
+        return default
+    
+    except Exception as e:
+        print(f"⚠️ 读取 {key_name} 失败: {e}")
+        return default
+
+# 使用安全读取
+GOOGLE_API_KEY = get_secret_safe("GOOGLE_API_KEY")
+ALI_API_KEY = get_secret_safe("ALI_API_KEY")
+ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
+
+# 诊断信息（部署后可以删除）
+print(f"""
+🔑 API Key 状态检查:
+Google: {'✅ 已配置 (' + str(len(GOOGLE_API_KEY)) + ' 字符)' if GOOGLE_API_KEY else '❌ 未读取到'}
+智谱:   {'✅ 已配置 (' + str(len(ZHIPU_API_KEY)) + ' 字符)' if ZHIPU_API_KEY else '❌ 未读取到'}
+阿里:   {'✅ 已配置 (' + str(len(ALI_API_KEY)) + ' 字符)' if ALI_API_KEY else '❌ 未读取到'}
+""")
 
 # 业务配置
 BIZ_CONFIG = {
@@ -1193,6 +1221,7 @@ Excerpt:
 
 st.divider()
 st.caption(f"🦁 {cinfo['name']} 运营中台 V29.2 | Powered by {engine_choice} ({sel_model})")
+
 
 
 
