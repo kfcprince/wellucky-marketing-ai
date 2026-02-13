@@ -15,7 +15,13 @@ import uuid
 import re
 
 # ==========================================
-# 0. 配置区 (从 Secrets 读取)
+# 0. 初始化系统缓存 (防止 AttributeError)
+# ==========================================
+if 'results' not in st.session_state:
+    st.session_state.results = []
+
+# ==========================================
+# 1. 核心配置与脱敏读取
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
@@ -26,9 +32,6 @@ except:
     ALI_API_KEY = ""
     ZHIPU_API_KEY = ""
 
-# ==========================================
-# 1. 业务配置
-# ==========================================
 BIZ_CONFIG = {
     "logistics": {
         "name": "VastLog",
@@ -36,30 +39,24 @@ BIZ_CONFIG = {
         "website": "www.vastlog.com",
         "phone": "+86 13780685000",
         "keywords": "international logistics, ddp shipping, sea freight",
-        "context": "Reliable DDP shipping and international freight services."
+        "context": "Professional DDP and international shipping provider."
     },
     "house": {
         "name": "WelluckyHouse",
         "full_name": "Wellucky Container House",
         "website": "www.welluckyhouse.com",
         "phone": "+86 18615329580",
-        "keywords": "expandable container house, folding house, modular cabin",
-        "context": "Professional manufacturer of premium expandable container houses."
+        "keywords": "expandable container house, folding house, luxury cabin",
+        "context": "Manufacturer of high-end expandable container houses."
     }
 }
 
 # ==========================================
-# 2. 核心函数
+# 2. 核心处理工具
 # ==========================================
 def clean_text(text):
     if not text: return ""
     return text.replace("**", "").replace("##", "").replace("###", "").strip()
-
-def generate_utm(base_url, platform, biz_key):
-    if not base_url: return ""
-    if not base_url.startswith("http"): base_url = "https://" + base_url
-    params = {"utm_source": platform.lower(), "utm_medium": "social", "utm_campaign": f"{biz_key}_ai"}
-    return f"{base_url}?{urllib.parse.urlencode(params)}"
 
 def convert_image(image):
     buf = io.BytesIO()
@@ -82,6 +79,7 @@ def apply_style(image, configs):
         line_h = h * 1.2
         total_h += line_h
         lines.append({"t":c['text'], "f":font, "col":c['color'], "w":w, "lh":line_h, "fs":fs})
+    
     curr_y = H - total_h - (H * 0.05)
     for l in lines:
         x = (W - l['w']) / 2
@@ -90,25 +88,20 @@ def apply_style(image, configs):
         curr_y += l['lh']
     return image
 
-# ==========================================
-# 3. AI 引擎 (修复 Gemini 模型名)
-# ==========================================
 def run_ai(engine, img, prompt, key, model):
     if engine == "google":
         try:
             genai.configure(api_key=key)
-            # 修复：移除可能导致 404 的前缀
-            m_name = model.replace("models/", "")
-            m = genai.GenerativeModel(m_name)
+            m = genai.GenerativeModel(model.replace("models/", ""))
             res = m.generate_content([prompt, img] if img else [prompt])
             return clean_text(res.text)
-        except Exception as e: return f"Error_{engine}"
+        except: return "Error_Google"
     elif engine == "zhipu":
         try:
             client = ZhipuAI(api_key=key)
             res = client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}])
             return clean_text(res.choices[0].message.content)
-        except: return f"Error_{engine}"
+        except: return "Error_Zhipu"
     else:
         try:
             dashscope.api_key = key
@@ -123,14 +116,13 @@ def run_ai(engine, img, prompt, key, model):
                 from dashscope import Generation
                 res = Generation.call(model="qwen-max", prompt=prompt)
                 return clean_text(res.output.text)
-        except: return f"Error_{engine}"
+        except: return "Error_Ali"
 
 # ==========================================
-# 4. UI 布局 (修复侧边栏与重复 ID)
+# 3. UI 布局
 # ==========================================
 st.set_page_config(page_title="狮子营销助手", layout="wide")
 
-# 侧边栏只定义一次
 with st.sidebar:
     st.title("⚙️ 配置中心")
     engine = st.radio("文案引擎", ("Google Gemini", "阿里通义", "智谱清言"))
@@ -150,69 +142,64 @@ with st.sidebar:
 st.header(f"🦁 {cinfo['name']} 数字化中心")
 tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GEO 优化"])
 
-# --- TAB 1 ---
 with tab1:
-    c1, c2 = st.columns(2)
-    files = c1.file_uploader("📂 上传素材", accept_multiple_files=True)
-    draft = c2.text_area("📝 补充描述", placeholder="AI 自动分析图片内容...")
+    col_f, col_d = st.columns(2)
+    files = col_f.file_uploader("📂 上传素材", accept_multiple_files=True, key="file_u")
+    draft = col_d.text_area("📝 补充描述", placeholder="AI分析图片生成文案...", key="draft_in")
     
     b1, b2 = st.columns(2)
-    do_img = b1.button("🖼️ 仅识图命名", use_container_width=True)
-    do_all = b2.button("🚀 全套处理", type="primary", use_container_width=True)
+    if b1.button("🖼️ 仅识图命名", use_container_width=True, key="btn_name"):
+        if files:
+            st.session_state.results = []
+            for f in files:
+                img = Image.open(f)
+                pn = f"Generate a 3-word SEO filename for this image. Include '{cinfo['name'].lower()}'. Hyphens only."
+                rn = run_ai(etype, img, pn, ekey, sel_mod)
+                cn = re.sub(r'[^a-z0-9\-]', '', rn.lower().replace(" ","-")) if "Error" not in rn else f"img-{uuid.uuid4().hex[:5]}"
+                st.session_state.results.append({"img": img, "name": f"{cn}.webp", "data": convert_image(img), "text": ""})
 
-    if (do_img or do_all) and files:
-        st.session_state.results = []
-        utm = generate_utm(cinfo['website'], plat, cbiz)
-        for f in files:
-            img = Image.open(f)
-            # 识图命名
-            p_n = f"Describe this image in 3 SEO keywords for a filename. Include '{cinfo['name'].lower()}'. Hyphens only, no ext."
-            raw_n = run_ai(etype, img, p_n, ekey, sel_mod)
-            # 容错处理：如果 AI 报错，使用随机名
-            if "Error" in raw_n or len(raw_n) > 60:
-                clean_n = f"{cinfo['name'].lower()}-{uuid.uuid4().hex[:5]}"
-            else:
-                clean_n = re.sub(r'[^a-z0-9\-]', '', raw_n.lower().replace(" ","-"))
-            
-            fname = f"{clean_n}.webp"
-            # 写文案
-            text = ""
-            if do_all:
-                p_t = f"Write a {plat} post for {cinfo['full_name']}. Content should focus on: {draft if draft else 'this image'}. Link: {utm}. Max 2 emojis."
-                text = run_ai(etype, img, p_t, ekey, sel_mod)
-            
-            st.session_state.results.append({"img": img, "name": fname, "data": convert_image(img), "text": text})
+    if b2.button("🚀 全套处理", type="primary", use_container_width=True, key="btn_all"):
+        if files:
+            st.session_state.results = []
+            for f in files:
+                img = Image.open(f)
+                pn = f"SEO filename for '{cinfo['name'].lower()}'. 3 keywords."
+                rn = run_ai(etype, img, pn, ekey, sel_mod)
+                cn = re.sub(r'[^a-z0-9\-]', '', rn.lower().replace(" ","-")) if "Error" not in rn else f"img-{uuid.uuid4().hex[:5]}"
+                pt = f"Professional {plat} post for {cinfo['full_name']}. Based on: {draft}. Web: {cinfo['website']}."
+                txt = run_ai(etype, img, pt, ekey, sel_mod)
+                st.session_state.results.append({"img": img, "name": f"{cn}.webp", "data": convert_image(img), "text": txt})
 
-    # 显示结果并修复 Duplicate ID
+    # 显示结果区
     for i, res in enumerate(st.session_state.results):
-        l, r = st.columns([1, 2])
-        l.image(res['img'], use_container_width=True)
-        r.code(res['name'])
-        if res['text']: r.text_area("文案", res['text'], height=150, key=f"txt_{i}")
-        # 核心修复：为每个下载按钮增加唯一 key
-        r.download_button(f"下载图片", res['data'], res['name'], key=f"dl_{i}")
+        r_l, r_r = st.columns([1, 2])
+        r_l.image(res['img'], use_container_width=True)
+        r_r.code(res['name'])
+        if res['text']: r_r.text_area("文案", res['text'], height=150, key=f"t_{i}")
+        r_r.download_button(f"下载图片", res['data'], res['name'], key=f"dl_{i}")
 
-# --- TAB 2 ---
 with tab2:
     st.subheader("🛠️ 封面制作")
-    u_c = st.file_uploader("上传背景图", type=['jpg', 'png'], key="cover_u")
+    u_c = st.file_uploader("上传图", type=['jpg', 'png'], key="u_c_tab2")
     if u_c:
         bg = Image.open(u_c)
-        col_l, col_r = st.columns([1, 2])
-        t1 = col_l.text_input("标题1", "PREMIUM QUALITY")
-        t2 = col_l.text_input("标题2", "EXPANDABLE HOUSE")
-        color = col_l.color_picker("颜色", "#FFDD00")
-        out = apply_style(bg.copy(), [{"text":t1,"color":"#FFF","size":0.1}, {"text":t2,"color":color,"size":0.15}])
-        col_r.image(out, use_container_width=True)
-        # 这里的 key 也是唯一的
-        b_io = io.BytesIO(); out.save(b_io, format="PNG")
-        col_r.download_button("保存封面", b_io.getvalue(), "cover.png", key="save_cover")
+        cl, cr = st.columns([1, 2])
+        t1 = cl.text_input("标题1", "WELLUCKY HOUSE", key="t1_tab2")
+        t2 = cl.text_input("标题2", "FACTORY PRICE", key="t2_tab2")
+        col = cl.color_picker("颜色", "#FFDD00", key="col_tab2")
+        out = apply_style(bg.copy(), [{"text":t1,"color":"#FFF","size":0.1}, {"text":t2,"color":col,"size":0.15}])
+        cr.image(out, use_container_width=True)
+        bio = io.BytesIO(); out.save(bio, format="PNG")
+        cr.download_button("保存封面", bio.getvalue(), "cover.png", key="dl_tab2")
 
-# --- TAB 3 ---
 with tab3:
-    st.subheader("🌍 GEO 专家")
-    raw = st.text_area("输入中文草稿", height=200, key="geo_in")
-    if st.button("✨ 执行优化", type="primary"):
-        p_g = f"As a Senior SEO expert, translate/refine this into professional English with high EEAT. Content: {raw}"
-        res = run_ai(etype, None, p_g, ekey, sel_mod)
-        st.write(res)
+    st.subheader("🌍 GEO 专家 (中译英 + HTML + Schema)")
+    raw_tx = st.text_area("输入发货记录或中文草稿", height=250, key="tx_tab3")
+    geo_u = st.file_uploader("上传对应实拍图 (可选)", type=['jpg', 'png'], key="u_tab3")
+    if st.button("✨ 执行深度优化", type="primary", key="btn_tab3"):
+        if raw_tx:
+            with st.spinner("AI 专家正在处理..."):
+                gp = f"As a Senior SEO expert, translate/refine this into professional English. Format in HTML with <h2>, <ul>. Provide FAQ Schema. Content: {raw_tx}"
+                res = run_ai(etype, Image.open(geo_u) if geo_u else None, gp, ekey, sel_mod)
+                st.markdown("### 💎 优化结果")
+                st.write(res)
