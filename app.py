@@ -255,8 +255,24 @@ with tab2:
 # --- Tab 3: SEO/GEO 深度优化 ---
 with tab3:
     st.subheader("🌍 内容深度加工 (中译英 + EEAT + Schema)")
-    raw = st.text_area("粘贴中文发货实录或英文草稿", height=250)
-    if st.button("✨ 执行深度优化", type="primary") and raw:
-        res = run_text_engine(eng_type, None, get_prompt(cur_info, "", raw, "", "geo"), cur_key, sel_mod)
-        st.markdown("### 💎 优化结果")
-        st.write(res)
+    col_text, col_img = st.columns([2, 1])
+    
+    with col_text:
+        raw_text = st.text_area("粘贴你的中文草稿或原始英文", height=300)
+    
+    with col_img:
+        # 新增：允许在 SEO 专家这里也上传图片
+        geo_image = st.file_uploader("📂 上传相关实拍图 (AI 会提取图片细节进入文案)", type=['jpg','png','webp'], key="geo_img")
+        if geo_image:
+            st.image(geo_image, caption="已加载图片证据", use_container_width=True)
+
+    if st.button("✨ 执行深度优化", type="primary"):
+        if raw_text:
+            # 修改逻辑：如果上传了图片，让 AI 同时处理图片和文字
+            geo_prompt = get_prompt(cur_info, "", raw_text, "", "geo")
+            with st.spinner("正在分析图片并润色文案..."):
+                # 调用时传入 geo_image
+                refined_content = run_text_engine(eng_type, geo_image, geo_prompt, cur_key, sel_mod)
+                st.markdown("### 💎 优化后的权威文案")
+                st.write(refined_content)
+
