@@ -83,61 +83,189 @@ def convert_to_webp(image):
     image.save(buf, format='WEBP', quality=85)
     return buf.getvalue()
 
-def get_clean_seo_name(ai_res, brand, business_type="house"):
-    """生成SEO友好的文件名 - 增强版"""
-    if not ai_res or "Error" in ai_res:
-        return f"{brand.lower()}-product-{uuid.uuid4().hex[:4]}"
+# ==========================================
+# 新增：智能文件名生成函数（测试版）
+# ==========================================
+
+def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2):
+    """
+    带重试机制的图像识别
+    如果第一次返回的格式不对，会自动重试一次
+    """
+    for attempt in range(max_retries):
+        result = run_ai_vision(engine, img, prompt, key, model_name)
+        
+        # 检查结果是否符合预期格式
+        if result and not result.startswith("Error"):
+            # 基本格式检查：应该包含至少2个连字符（brand-word1-word2）
+            if result.count('-') >= 2:
+                # 检查是否包含垃圾词
+                garbage_words = ['this', 'image', 'photo', 'picture', 'showing', 'depicts']
+                if not any(word in result.lower() for word in garbage_words):
+                    return result  # ✅ 格式合格，直接返回
+        
+        # 如果是最后一次尝试，返回结果（即使不理想）
+        if attempt == max_retries - 1:
+            return result
     
-    # 清理AI返回的内容
-    name = ai_res.strip().lower()
+    return result
+
+
+def generate_seo_filename_smart(engine, img, brand, business_type, api_key, model_name):
+    """
+    智能生成SEO文件名 - 使用Few-Shot Learning
     
-    # 移除常见的无用前缀和后缀
-    name = re.sub(r'^(the |a |an |this is |here is |this image shows |filename: )', '', name)
-    name = re.sub(r'(\.webp|\.jpg|\.png|\.jpeg)$', '', name)
+    参数:
+        engine: AI引擎 (Google Gemini / 智谱清言 / 阿里通义)
+        img: PIL图片对象
+        brand: 品牌名 (Wellucky / VastLog)
+        business_type: 业务类型 (house / logistics)
+        api_key: API密钥
+        model_name: 模型名称
     
-    # 只保留字母、数字、空格和连字符
-    name = re.sub(r'[^a-z0-9\s-]', ' ', name)
+    返回:
+        SEO友好的文件名（不含扩展名）
+    """
     
-    # 分词
-    words = name.split()
+    # 获取业务关键词
+    biz_config = BIZ_CONFIG.get(business_type, {})
+    biz_keywords = biz_config.get("keywords", ["product"])
+    keyword_examples = ", ".join(biz_keywords[:6])
     
-    # 过滤无用词（扩展的停用词列表）
+    # 构建Few-Shot Prompt（核心：给AI看3个标准例子）
+    prompt = f"""You are a professional SEO filename generator for {brand}.
+
+TASK: Analyze this product image and generate a SEO-optimized filename.
+
+EXACT OUTPUT FORMAT:
+{brand.lower()}-keyword1-keyword2-keyword3-keyword4
+
+✅ PERFECT EXAMPLES (learn from these):
+
+Example 1:
+Image: White container house with modern design, exterior view
+Output: {brand.lower()}-container-house-white-exterior
+
+Example 2:
+Image: Blue modular office building with steel frame structure
+Output: {brand.lower()}-modular-office-blue-steel-frame
+
+Example 3:
+Image: Portable cabin interior showing modern furniture
+Output: {brand.lower()}-portable-cabin-modern-interior
+
+KEYWORD VOCABULARY (use words from these categories):
+
+Product Types: {keyword_examples}
+Colors: white, blue, gray, black, red, green, beige, brown
+Materials: steel, aluminum, wood, composite, metal, glass
+Views: exterior, interior, front, side, rear, aerial, detail, close-up
+Features: modern, portable, compact, large, small, luxury, custom, prefab, modular
+
+STRICT RULES:
+1. MUST start with: {brand.lower()}-
+2. Add 3-5 descriptive keywords after brand
+3. Use ONLY hyphens (-) to separate words
+4. Use ONLY lowercase letters
+5. NO spaces, NO underscores, NO special characters
+6. NO generic words: image, photo, picture, view, showing, product, item, thing
+7. NO file extensions (.webp, .jpg, .png)
+8. NO explanations or extra text
+
+ANALYSIS STEPS:
+1. Identify the main product type
+2. Note prominent colors
+3. Identify materials if visible
+4. Determine the viewing angle
+5. Spot distinctive features
+
+Now analyze the image and output ONLY the filename (one line, nothing else):"""
+
+    # 调用AI（带重试机制）
+    raw_response = run_ai_vision_with_retry(
+        engine=engine,
+        img=img,
+        prompt=prompt,
+        key=api_key,
+        model_name=model_name,
+        max_retries=2  # 最多重试2次
+    )
+    
+    # === 清理AI返回的内容 ===
+    
+    filename = raw_response.strip().lower()
+    
+    # 移除常见的垃圾前缀/后缀
+    garbage_patterns = [
+        r'^(filename|output|result|answer):\s*',  # "filename: xxx"
+        r'^(the filename is|here is)\s*',         # "the filename is xxx"
+        r'```.*?```',                              # markdown代码块
+        r'\*\*|\*',                                # markdown粗体/斜体
+        r'\.webp$|\.jpg$|\.png$|\.jpeg$'          # 文件扩展名
+    ]
+    
+    for pattern in garbage_patterns:
+        filename = re.sub(pattern, '', filename, flags=re.IGNORECASE)
+    
+    filename = filename.strip()
+    
+    # 只保留字母、数字和连字符
+    filename = re.sub(r'[^a-z0-9-]', '-', filename)
+    
+    # 清理多余的连字符
+    filename = re.sub(r'-+', '-', filename)      # 多个连字符 → 单个
+    filename = filename.strip('-')                # 删除首尾连字符
+    
+    # === 格式验证与修复 ===
+    
+    brand_lower = brand.lower()
+    parts = filename.split('-')
+    
+    # 检查1：是否以品牌名开头
+    if not filename.startswith(brand_lower + '-'):
+        # 尝试在parts中找到品牌名
+        if brand_lower in parts:
+            parts.remove(brand_lower)
+        # 把品牌名加到开头
+        parts.insert(0, brand_lower)
+        filename = '-'.join(parts)
+    
+    # 重新分割
+    parts = filename.split('-')
+    
+    # 检查2：是否有足够的关键词（至少3部分：brand + 2个描述词）
+    if len(parts) < 3:
+        # 格式不合格，使用后备方案
+        fallback_keyword = biz_keywords[0] if biz_keywords else "product"
+        fallback_filename = f"{brand_lower}-{fallback_keyword}-{uuid.uuid4().hex[:6]}"
+        return fallback_filename
+    
+    # 检查3：过滤垃圾词
     stop_words = {
-        'this', 'that', 'the', 'and', 'for', 'with', 'from', 'are', 'was', 'were',
-        'image', 'photo', 'picture', 'view', 'shot', 'showing', 'shows', 'depicts',
-        'product', 'item', 'thing', 'object', 'example', 'sample',
-        'file', 'name', 'filename', 'called'
+        'this', 'that', 'the', 'and', 'for', 'with', 'from',
+        'image', 'photo', 'picture', 'view', 'showing', 'depicts',
+        'product', 'item', 'thing', 'object', 'file', 'name'
     }
     
-    cleaned_words = []
-    for word in words:
-        # 跳过太短的词（<3个字符）
-        if len(word) < 3:
-            continue
-        # 跳过停用词
-        if word in stop_words:
-            continue
-        # 跳过纯数字
-        if word.isdigit():
-            continue
-        cleaned_words.append(word)
+    cleaned_parts = [brand_lower]  # 保留品牌名
+    for part in parts[1:]:  # 从第二个词开始检查
+        # 跳过太短的词（<3字符）或停用词
+        if len(part) >= 3 and part not in stop_words:
+            cleaned_parts.append(part)
     
-    # 确保品牌名在最前面
-    brand_low = brand.lower()
-    if brand_low in cleaned_words:
-        cleaned_words.remove(brand_low)
+    # 如果清理后词太少，说明都是垃圾词
+    if len(cleaned_parts) < 3:
+        fallback_keyword = biz_keywords[0] if biz_keywords else "product"
+        fallback_filename = f"{brand_lower}-{fallback_keyword}-{uuid.uuid4().hex[:6]}"
+        return fallback_filename
     
-    # 构建最终文件名：品牌名 + 关键词
-    final_words = [brand_low] + cleaned_words[:5]
+    # 检查4：限制长度（品牌名 + 最多5个关键词）
+    if len(cleaned_parts) > 6:
+        cleaned_parts = cleaned_parts[:6]
     
-    # 如果关键词太少（说明AI返回了无用内容），使用默认命名
-    if len(final_words) < 3:
-        # 使用随机关键词作为后备
-        biz_keywords = BIZ_CONFIG.get(business_type, {}).get("keywords", ["product"])
-        fallback = f"{brand_low}-{biz_keywords[0]}-{uuid.uuid4().hex[:4]}"
-        return fallback
+    final_filename = '-'.join(cleaned_parts)
     
-    return "-".join(final_words)
+    return final_filename
 
 def run_ai_text(engine, prompt, key, model_name):
     """纯文本AI调用"""
@@ -487,18 +615,22 @@ Write the post directly, no explanations.
             status_text = st.empty()
             
             for idx, uploaded_file in enumerate(files_t1):
-                status_text.text(f"处理中: {uploaded_file.name} ({idx+1}/{len(files_t1)})")
-                
-                img = Image.open(uploaded_file).convert("RGB")
-                
-                # 1. 图片识别并重命名
-                raw_response = run_ai_vision(engine_choice, img, prompt_naming, api_key, sel_model)
-                
-                # 🔍 调试信息（可选）
-                with st.expander(f"🔍 调试 - AI原始返回 ({uploaded_file.name})", expanded=False):
-                    st.code(raw_response, language="text")
-                
-                clean_filename = get_clean_seo_name(raw_response, cinfo['name'], cbiz) + ".webp"
+    status_text.text(f"处理中: {uploaded_file.name} ({idx+1}/{len(files_t1)})")
+    
+    img = Image.open(uploaded_file).convert("RGB")
+    
+    # 1. 图片识别并重命名（使用新的智能函数）
+    clean_filename = generate_seo_filename_smart(
+        engine=engine_choice,
+        img=img,
+        brand=cinfo['name'],
+        business_type=cbiz,
+        api_key=api_key,
+        model_name=sel_model
+    ) + ".webp"
+    
+    # 保存原始AI响应用于调试
+    raw_ai_response = f"[使用智能命名函数，基于Few-Shot Learning]"
                 
                 # 2. 生成文案
                 copywriting_text = ""
@@ -542,6 +674,32 @@ Write the post directly, no explanations.
                     )
                 
                 with col_content:
+                    # 显示调试信息
+    with st.expander("🔍 调试信息", expanded=False):
+        st.caption("使用了Few-Shot智能命名函数")
+        st.caption(f"品牌: {cinfo['name']} | 业务: {cbiz}")
+    
+    st.text_input("SEO文件名", value=result['new_name'], key=f"name_{idx}")
+```
+
+---
+
+## 🧪 测试步骤
+
+### **测试1：上传集装箱房屋图片**
+
+1. 选择 Wellucky 业务
+2. 选择你常用的AI引擎（比如阿里通义）
+3. 上传1-2张集装箱房屋的图片
+4. 点击"仅识图重命名"
+
+**预期结果：**
+```
+✅ wellucky-container-house-white-exterior.webp
+✅ wellucky-modular-building-blue-steel.webp
+
+而不是：
+❌ wellucky-item-36c8.webp
                     st.text_input("SEO文件名", value=result['new_name'], key=f"name_{idx}")
                     
                     if result['copy_text']:
@@ -1091,3 +1249,4 @@ Excerpt:
 
 st.divider()
 st.caption(f"🦁 {cinfo['name']} 运营中台 V29.2 | Powered by {engine_choice} ({sel_model})")
+
