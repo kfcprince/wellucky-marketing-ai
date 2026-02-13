@@ -2,4 +2,5 @@ streamlit
 google-generativeai
 dashscope
 Pillow
+zhipuai
 requests
