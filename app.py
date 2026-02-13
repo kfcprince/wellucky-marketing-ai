@@ -118,10 +118,7 @@ def generate_ai_cover(prompt, ratio, api_key):
     except: return None
 
 def get_prompt(info, platform, user_draft, link, task_type):
-    """
-    AI 提示词中心
-    根据不同任务（文案、SEO文件名、GEO深度优化）生成对应的指令
-    """
+    """ AI 指令中心：增加识图命名逻辑 """
     contact = f"Web: {info['website']}, WhatsApp: {info['phone']}"
     
     # 任务 A: 社交媒体文案
@@ -148,17 +145,15 @@ def get_prompt(info, platform, user_draft, link, task_type):
         {user_draft}
         """
     
-    # 任务 C: SEO 图片文件名
-    # 找到 get_prompt 里的文件名生成逻辑，替换为：
+    # 任务 C: 图片 SEO 命名 (修改这里)
     else:
-    return f"""
-    Task: Generate a 3-5 word SEO-friendly filename for this image.
-    Rules:
-    1. Only output the keywords separated by hyphens.
-    2. Include the brand '{info['name'].lower()}'.
-    3. Focus on the visual content (e.g., solar panels, luxury interior, 40ft).
-    4. No spaces, no capital letters, no file extension.
-    Example output: welluckyhouse-expandable-container-home-solar-panels
+        return f"""
+        Task: Describe this image in 3-5 keywords for a Google SEO filename. 
+        Rules:
+        1. Only output keywords separated by hyphens.
+        2. Must include brand '{info['name'].lower()}'.
+        3. No spaces, no capital letters, no file extension.
+        Example: welluckyhouse-solar-panel-expandable-home
     
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
     if engine == "zhipu":
@@ -227,10 +222,38 @@ with tab1:
     if (btn_img or btn_all) and u_files:
         st.session_state.results = []
         link = generate_utm(cur_info['website'], platform, cur_biz)
+        import re # 导入正则用于清理文件名
+        
         for f in u_files:
             img = Image.open(f)
-            # 找到这一行并替换逻辑：
-name = run_text_engine(eng_type, img, get_prompt(cur_info, platform, "", "", "name"), cur_key, sel_mod)
+            # 1. 获取 AI 生成的 SEO 文件名
+            p_name = get_prompt(cur_info, platform, "", "", "name")
+            ai_name = run_text_engine(eng_type, img, p_name, cur_key, sel_mod)
+            
+            # 2. 清洗文件名逻辑
+            if not ai_name or "Error" in ai_name or len(ai_name) > 100:
+                clean_name = f"{cur_info['name'].lower()}-{uuid.uuid4().hex[:5]}"
+            else:
+                # 变成小写、空格转连字符、去掉非法字符
+                clean_name = ai_name.lower().strip()
+                clean_name = clean_name.replace(" ", "-").replace("_", "-").replace(".webp", "")
+                clean_name = re.sub(r'[^a-z0-9\-]', '', clean_name) # 只保留字母数字和连字符
+            
+            res_name = f"{clean_name}.webp"
+            
+            # 3. 生成文案 (如果是全套处理)
+            text = ""
+            if btn_all:
+                p_text = get_prompt(cur_info, platform, draft, link, "content")
+                text = run_text_engine(eng_type, img, p_text, cur_key, sel_mod)
+            
+            st.session_state.results.append({
+                "img": img, 
+                "name": res_name, 
+                "data": convert_image(img), 
+                "text": text
+            })
+        st.success("图片 SEO 优化完成！")
 
 # 新的清理逻辑：确保文件名是干净的 SEO 格式
 if not name or "Error" in name or len(name) > 100:
@@ -332,6 +355,7 @@ with tab3:
                     st.caption("提示：点击右上角复制按钮，粘贴到网站后台的 HTML/源码模式下。")
         else:
             st.warning("请先输入内容")
+
 
 
 
