@@ -150,7 +150,7 @@ def get_prompt(info, platform, user_draft, link, task_type):
     
     # 任务 C: SEO 图片文件名
     # 找到 get_prompt 里的文件名生成逻辑，替换为：
-else:
+    else:
     return f"""
     Task: Generate a 3-5 word SEO-friendly filename for this image.
     Rules:
@@ -317,5 +317,6 @@ with tab3:
                     st.caption("提示：点击右上角复制按钮，粘贴到网站后台的 HTML/源码模式下。")
         else:
             st.warning("请先输入内容")
+
 
 
