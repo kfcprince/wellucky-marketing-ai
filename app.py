@@ -9,7 +9,7 @@ import io, base64, re, os, requests, uuid, json
 # ==========================================
 # 0. 全局配置
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.1", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.2", layout="wide", page_icon="🦁")
 
 # 初始化 session_state
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
@@ -31,14 +31,16 @@ BIZ_CONFIG = {
         "website": "www.vastlog.com", 
         "color": "#FF9900", 
         "type": "LogisticsService",
-        "description": "Professional international logistics and shipping solutions"
+        "description": "Professional international logistics and shipping solutions",
+        "keywords": ["logistics", "shipping", "freight", "cargo", "delivery", "transport", "DDP", "express"]
     },
     "house": {
         "name": "Wellucky", 
         "website": "www.wellucky.com", 
         "color": "#0066CC", 
         "type": "Product",
-        "description": "Innovative container house and modular building solutions"
+        "description": "Innovative container house and modular building solutions",
+        "keywords": ["container", "house", "modular", "prefab", "portable", "cabin", "building", "steel"]
     }
 }
 
@@ -81,24 +83,64 @@ def convert_to_webp(image):
     image.save(buf, format='WEBP', quality=85)
     return buf.getvalue()
 
-def get_clean_seo_name(ai_res, brand):
-    """生成SEO友好的文件名"""
-    if not ai_res or "Error" in ai_res: 
-        return f"{brand.lower()}-item-{uuid.uuid4().hex[:4]}"
+def get_clean_seo_name(ai_res, brand, business_type="house"):
+    """生成SEO友好的文件名 - 增强版"""
+    if not ai_res or "Error" in ai_res:
+        return f"{brand.lower()}-product-{uuid.uuid4().hex[:4]}"
     
-    name = ai_res.lower()
-    name = re.sub(r'[^a-z0-9]', ' ', name)
-    words = [w for w in name.split() if len(w) > 2 and w not in {'this','image','photo','view','the','and','for'}]
+    # 清理AI返回的内容
+    name = ai_res.strip().lower()
     
+    # 移除常见的无用前缀和后缀
+    name = re.sub(r'^(the |a |an |this is |here is |this image shows |filename: )', '', name)
+    name = re.sub(r'(\.webp|\.jpg|\.png|\.jpeg)$', '', name)
+    
+    # 只保留字母、数字、空格和连字符
+    name = re.sub(r'[^a-z0-9\s-]', ' ', name)
+    
+    # 分词
+    words = name.split()
+    
+    # 过滤无用词（扩展的停用词列表）
+    stop_words = {
+        'this', 'that', 'the', 'and', 'for', 'with', 'from', 'are', 'was', 'were',
+        'image', 'photo', 'picture', 'view', 'shot', 'showing', 'shows', 'depicts',
+        'product', 'item', 'thing', 'object', 'example', 'sample',
+        'file', 'name', 'filename', 'called'
+    }
+    
+    cleaned_words = []
+    for word in words:
+        # 跳过太短的词（<3个字符）
+        if len(word) < 3:
+            continue
+        # 跳过停用词
+        if word in stop_words:
+            continue
+        # 跳过纯数字
+        if word.isdigit():
+            continue
+        cleaned_words.append(word)
+    
+    # 确保品牌名在最前面
     brand_low = brand.lower()
-    if brand_low in words: 
-        words.remove(brand_low)
-    words.insert(0, brand_low)
+    if brand_low in cleaned_words:
+        cleaned_words.remove(brand_low)
     
-    return "-".join(words[:6])
+    # 构建最终文件名：品牌名 + 关键词
+    final_words = [brand_low] + cleaned_words[:5]
+    
+    # 如果关键词太少（说明AI返回了无用内容），使用默认命名
+    if len(final_words) < 3:
+        # 使用随机关键词作为后备
+        biz_keywords = BIZ_CONFIG.get(business_type, {}).get("keywords", ["product"])
+        fallback = f"{brand_low}-{biz_keywords[0]}-{uuid.uuid4().hex[:4]}"
+        return fallback
+    
+    return "-".join(final_words)
 
 def run_ai_text(engine, prompt, key, model_name):
-    """纯文本AI调用（用于生成文案、SEO等）"""
+    """纯文本AI调用"""
     if not key: 
         return "Error: 缺少 API Key"
     
@@ -111,7 +153,6 @@ def run_ai_text(engine, prompt, key, model_name):
         
         elif engine == "智谱清言":
             client = ZhipuAI(api_key=key)
-            # 智谱纯文本用 glm-4-plus 或 glm-4
             text_model = "glm-4-plus" if "plus" in model_name else "glm-4"
             response = client.chat.completions.create(
                 model=text_model,
@@ -122,7 +163,6 @@ def run_ai_text(engine, prompt, key, model_name):
         elif engine == "阿里通义":
             dashscope.api_key = key
             messages = [{"role": "user", "content": prompt}]
-            # 阿里纯文本用qwen-max
             response = Generation.call(
                 model='qwen-max',
                 messages=messages
@@ -149,7 +189,6 @@ def run_ai_vision(engine, img, prompt, key, model_name):
         elif engine == "智谱清言":
             client = ZhipuAI(api_key=key)
             img_base64 = f"data:image/png;base64,{pil_to_base64(img)}"
-            # 智谱图片识别必须用 glm-4v 或你的 glm-4-6v
             vision_model = model_name if "v" in model_name.lower() else "glm-4v"
             response = client.chat.completions.create(
                 model=vision_model,
@@ -177,7 +216,7 @@ def run_ai_vision(engine, img, prompt, key, model_name):
                     ]
                 }]
                 response = MultiModalConversation.call(
-                    model=model_name,  # qwen-vl-max 或 qwen-vl-plus
+                    model=model_name,
                     messages=messages
                 )
                 
@@ -264,7 +303,7 @@ def analyze_seo_score(html_content):
 # 2. 侧边栏配置
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 系统配置 V29.1")
+    st.title("⚙️ 系统配置 V29.2")
     
     # 业务选择
     st.markdown("### 🏢 业务模式")
@@ -284,7 +323,6 @@ with st.sidebar:
     st.markdown("### 🧠 AI 引擎配置")
     engine_choice = st.radio("选择AI厂商", ("Google Gemini", "智谱清言", "阿里通义"))
     
-    # 根据引擎显示不同模型（修正后的模型列表）
     if engine_choice == "Google Gemini":
         model_options = [
             "gemini-2.0-flash-exp",
@@ -299,24 +337,23 @@ with st.sidebar:
     
     elif engine_choice == "智谱清言":
         model_options = [
-            "glm-4-6v",      # 你实际使用的模型
-            "glm-4v",        # 图片识别
-            "glm-4-plus",    # 纯文本
-            "glm-4"          # 标准版
+            "glm-4-6v",
+            "glm-4v",
+            "glm-4-plus",
+            "glm-4"
         ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = ZHIPU_API_KEY
         api_status = "✅ 已配置" if ZHIPU_API_KEY else "❌ 未配置"
         
-        # 提示：图片识别需要v系列模型
         if "v" not in sel_model.lower():
             st.caption("⚠️ 图片识别需选择带'v'的模型")
     
-    else:  # 阿里通义
+    else:
         model_options = [
-            "qwen-vl-max",    # 图片识别
-            "qwen-vl-plus",   # 图片识别
-            "qwen-max"        # 纯文本
+            "qwen-vl-max",
+            "qwen-vl-plus",
+            "qwen-max"
         ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = ALI_API_KEY
@@ -326,7 +363,6 @@ with st.sidebar:
     
     st.divider()
     
-    # 系统信息
     st.markdown("### 📊 系统状态")
     st.caption(f"• 引擎: {engine_choice}")
     st.caption(f"• 模型: {sel_model}")
@@ -335,10 +371,7 @@ with st.sidebar:
 # ==========================================
 # 3. 主界面
 # ==========================================
-st.markdown(
-    f"## 🦁 {cinfo['name']} 数字化运营台", 
-    unsafe_allow_html=True
-)
+st.markdown(f"## 🦁 {cinfo['name']} 数字化运营台")
 
 tab1, tab2, tab3 = st.tabs([
     "✍️ 智能文案生成", 
@@ -347,7 +380,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# Tab 1: 智能文案生成
+# Tab 1: 智能文案生成（优化后的Prompt）
 # ==========================================
 with tab1:
     st.markdown("### 📝 批量图片识别 + 社媒文案生成")
@@ -394,42 +427,61 @@ with tab1:
             help="识别图片 + 生成社媒文案 + 转WebP"
         )
     
-    # 处理逻辑
     if (btn_rename_only or btn_full_process) and files_t1:
         if not api_key:
             st.error("❌ 请先在Streamlit Secrets中配置API Key！")
         else:
             st.session_state.results_tab1 = []
             
-            # Prompt设计
+            # 🔥 优化后的Prompt - 更严格的格式要求
             prompt_naming = f"""
-            Analyze this product image and generate a SEO-friendly filename.
-            Format: {cinfo['name'].lower()}-keyword1-keyword2-keyword3
-            Rules:
-            - Use lowercase only
-            - Use hyphens to separate words
-            - Include 3-5 descriptive keywords
-            - Focus on product type, material, use case
-            - No generic words like 'image', 'photo', 'product'
-            
-            Output only the filename, nothing else.
-            """
-            
+You are a professional SEO filename generator for {cinfo['name']} ({cinfo['type']}).
+
+Analyze this product image and output ONLY a filename following this EXACT format:
+{cinfo['name'].lower()}-keyword1-keyword2-keyword3-keyword4
+
+STRICT RULES:
+1. Start with: {cinfo['name'].lower()}-
+2. Add 3-5 descriptive keywords separated by hyphens
+3. Keywords should describe:
+   - Product category: {', '.join(cinfo['keywords'][:4])}
+   - Material/feature: steel, aluminum, white, blue, modern, portable
+   - View/angle: exterior, interior, front, side, aerial
+4. Use ONLY lowercase letters (a-z)
+5. NO spaces, NO underscores, ONLY hyphens (-)
+6. NO generic words: image, photo, picture, view, showing, this
+7. NO file extensions (.webp, .jpg, .png)
+8. NO numbers or codes unless describing a model
+
+GOOD examples:
+{cinfo['name'].lower()}-container-house-white-exterior
+{cinfo['name'].lower()}-modular-office-steel-frame
+{cinfo['name'].lower()}-portable-cabin-modern-design
+{cinfo['name'].lower()}-prefab-building-blue-facade
+
+BAD examples (DO NOT DO THIS):
+container house with white walls
+This is a {cinfo['name']} product
+{cinfo['name']}-image-0532.webp
+
+Output ONLY the filename in the correct format. No explanations, no extra text.
+Filename:"""
+
             platform_rule = PLATFORM_RULES[platform_choice]
             prompt_copywriting = f"""
-            You are a social media expert for {cinfo['name']} ({cinfo['type']}).
-            Create a {platform_choice} post for this product image.
-            
-            Requirements:
-            - {platform_rule['length']}
-            - Tone: {platform_rule['tone']}
-            - Include product benefits and call-to-action
-            {'- Include ' + platform_rule['hashtags'] + ' relevant hashtags at the end' if include_hashtags else ''}
-            
-            Context: {draft_context if draft_context else 'Professional product promotion'}
-            
-            Write the post directly, no explanations.
-            """
+You are a social media expert for {cinfo['name']} ({cinfo['type']}).
+Create a {platform_choice} post for this product image.
+
+Requirements:
+- {platform_rule['length']}
+- Tone: {platform_rule['tone']}
+- Include product benefits and call-to-action
+{'- Include ' + platform_rule['hashtags'] + ' relevant hashtags at the end' if include_hashtags else ''}
+
+Context: {draft_context if draft_context else 'Professional product promotion'}
+
+Write the post directly, no explanations.
+"""
             
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -440,10 +492,15 @@ with tab1:
                 img = Image.open(uploaded_file).convert("RGB")
                 
                 # 1. 图片识别并重命名
-                raw_name = run_ai_vision(engine_choice, img, prompt_naming, api_key, sel_model)
-                clean_filename = get_clean_seo_name(raw_name, cinfo['name']) + ".webp"
+                raw_response = run_ai_vision(engine_choice, img, prompt_naming, api_key, sel_model)
                 
-                # 2. 生成文案（如果选择完整处理）
+                # 🔍 调试信息（可选）
+                with st.expander(f"🔍 调试 - AI原始返回 ({uploaded_file.name})", expanded=False):
+                    st.code(raw_response, language="text")
+                
+                clean_filename = get_clean_seo_name(raw_response, cinfo['name'], cbiz) + ".webp"
+                
+                # 2. 生成文案
                 copywriting_text = ""
                 if btn_full_process:
                     copywriting_text = run_ai_vision(engine_choice, img, prompt_copywriting, api_key, sel_model)
@@ -456,7 +513,8 @@ with tab1:
                     "img": img,
                     "new_name": clean_filename,
                     "copy_text": copywriting_text,
-                    "webp_data": webp_data
+                    "webp_data": webp_data,
+                    "raw_ai_response": raw_response  # 保存原始响应
                 })
                 
                 progress_bar.progress((idx + 1) / len(files_t1))
@@ -479,7 +537,8 @@ with tab1:
                         data=result['webp_data'],
                         file_name=result['new_name'],
                         mime="image/webp",
-                        use_container_width=True
+                        use_container_width=True,
+                        key=f"dl_{idx}"
                     )
                 
                 with col_content:
@@ -493,10 +552,12 @@ with tab1:
                             key=f"copy_{idx}"
                         )
                         
-                        # 文案统计
                         char_count = len(result['copy_text'])
                         hashtag_count = result['copy_text'].count('#')
                         st.caption(f"📊 字符数: {char_count} | Hashtags: {hashtag_count}")
+
+# Tab 2 和 Tab 3 保持不变...
+# （由于字数限制，这里省略，你可以直接复制之前的Tab 2和Tab 3代码）
 
 # ==========================================
 # Tab 2: 封面工厂
@@ -506,7 +567,6 @@ with tab2:
     
     col_bg, col_text = st.columns([1, 1])
     
-    # 左侧：背景层
     with col_bg:
         st.markdown("#### A. 背景图层")
         
@@ -536,7 +596,7 @@ with tab2:
                 bg_image = Image.open(uploaded_bg).convert("RGBA")
                 bg_image = bg_image.resize((preset_size[0], preset_size[1]))
         
-        else:  # AI生成
+        else:
             ai_prompt = st.text_input(
                 "🎨 描述画面内容",
                 placeholder="例如: modern container house in sunset, professional photography"
@@ -572,7 +632,6 @@ with tab2:
             if st.session_state.generated_bg:
                 bg_image = st.session_state.generated_bg
     
-    # 右侧：文字层
     with col_text:
         st.markdown("#### B. 文字叠加层")
         
@@ -597,7 +656,6 @@ with tab2:
             color3 = col_t3b.color_picker("颜色", "#FFD700", key="t3_color")
             y3 = st.slider("垂直位置", 0, preset_size[1], int(preset_size[1]*0.7), key="t3_y")
     
-    # 预览与导出
     if bg_image:
         st.divider()
         st.markdown("### 🖼️ 封面预览")
@@ -612,7 +670,6 @@ with tab2:
             
             font = get_font(int(size))
             
-            # 计算文字宽度
             try:
                 text_width = draw.textlength(text, font=font)
             except:
@@ -621,16 +678,13 @@ with tab2:
             
             x = (W - text_width) / 2
             
-            # 绘制阴影
             draw.text((x + 4, y_pos + 4), text, font=font, fill="black")
-            # 绘制文字
             draw.text((x, y_pos), text, font=font, fill=color)
         
         draw_text_with_shadow(text1, size1, color1, y1)
         draw_text_with_shadow(text2, size2, color2, y2)
         draw_text_with_shadow(text3, size3, color3, y3)
         
-        # 如果是YouTube，绘制安全区参考线
         if "YouTube" in preset_choice:
             safe_x1 = int((W - 1546) / 2)
             safe_y1 = int((H - 423) / 2)
@@ -644,11 +698,9 @@ with tab2:
         
         st.image(final_cover, use_column_width=True)
         
-        # 导出选项
         col_exp1, col_exp2 = st.columns(2)
         
         with col_exp1:
-            # 导出JPG
             buf_jpg = io.BytesIO()
             final_cover.convert("RGB").save(buf_jpg, format="JPEG", quality=95)
             st.download_button(
@@ -660,7 +712,6 @@ with tab2:
             )
         
         with col_exp2:
-            # 导出PNG
             buf_png = io.BytesIO()
             final_cover.save(buf_png, format="PNG")
             st.download_button(
@@ -671,9 +722,7 @@ with tab2:
                 use_container_width=True
             )
 
-# ==========================================
-# Tab 3: GEO/EEAT 优化专家
-# ==========================================
+# Tab 3: GEO/EEAT（继续使用之前的完整代码）
 with tab3:
     st.markdown("### 🌍 SEO内容生成 + EEAT优化 + Schema标记")
     
@@ -714,7 +763,6 @@ with tab3:
             for img_file in uploaded_images:
                 st.image(img_file, width=100)
     
-    # 高级选项
     with st.expander("⚙️ 高级选项"):
         col_adv1, col_adv2 = st.columns(2)
         
@@ -736,7 +784,6 @@ with tab3:
                 height=60
             )
     
-    # 生成按钮
     if st.button("✨ 生成完整SEO内容", type="primary", use_container_width=True):
         if not chinese_content or not article_title:
             st.warning("⚠️ 请输入中文内容和文章标题")
@@ -745,15 +792,12 @@ with tab3:
         else:
             with st.spinner("🤖 AI正在生成SEO优化内容..."):
                 try:
-                    # 准备图片文件名列表
                     image_filenames = []
-                    image_alt_texts = []
                     
                     if uploaded_images:
                         for img_file in uploaded_images:
                             image_filenames.append(img_file.name)
                     
-                    # 构建主Prompt
                     main_prompt = f"""
 You are an SEO expert specializing in EEAT (Experience, Expertise, Authoritativeness, Trustworthiness) content optimization for {cinfo['name']}.
 
@@ -831,9 +875,7 @@ Return ONLY the complete HTML code, starting with:
 Do not include any explanations or comments outside the HTML code.
 """
                     
-                    # 调用AI生成HTML
                     if engine_choice == "Google Gemini" and uploaded_images:
-                        # Google支持图文混合
                         content_parts = [main_prompt]
                         for img_file in uploaded_images:
                             img = Image.open(img_file)
@@ -845,25 +887,18 @@ Do not include any explanations or comments outside the HTML code.
                         html_output = response.text
                     
                     else:
-                        # 其他引擎用纯文本
                         html_output = run_ai_text(engine_choice, main_prompt, api_key, sel_model)
                     
-                    # 清理输出（移除markdown代码块标记）
                     html_output = re.sub(r'^```html\s*', '', html_output)
                     html_output = re.sub(r'\s*```$', '', html_output)
                     html_output = html_output.strip()
                     
-                    # ============================================
-                    # 生成SEO元数据
-                    # ============================================
-                    
-                    # 1. 自定义URL
+                    # SEO元数据生成
                     url_slug = article_title.lower()
                     url_slug = re.sub(r'[^\w\s-]', '', url_slug)
                     url_slug = re.sub(r'[\s_]+', '-', url_slug)
                     url_slug = f"{cinfo['name'].lower()}-{url_slug}"
                     
-                    # 2. Meta Description
                     meta_desc_prompt = f"""
 Generate a compelling Meta Description (150-155 characters) for this article:
 Title: {article_title}
@@ -879,7 +914,6 @@ Output only the meta description text, no explanations.
 """
                     meta_description = run_ai_text(engine_choice, meta_desc_prompt, api_key, sel_model).strip()
                     
-                    # 3. Meta Keywords
                     keywords_prompt = f"""
 Extract 8-12 relevant SEO keywords from this content:
 {chinese_content}
@@ -894,7 +928,6 @@ Output only the keyword list, no explanations.
 """
                     meta_keywords = run_ai_text(engine_choice, keywords_prompt, api_key, sel_model).strip()
                     
-                    # 4. 摘要/Excerpt
                     excerpt_prompt = f"""
 Write a compelling excerpt/summary (180-220 words) for this article:
 Title: {article_title}
@@ -911,7 +944,6 @@ Output only the excerpt text, no explanations.
 """
                     excerpt_text = run_ai_text(engine_choice, excerpt_prompt, api_key, sel_model).strip()
                     
-                    # 5. 图片Alt文本（如果有图片）
                     image_alts = []
                     if uploaded_images:
                         for img_file in uploaded_images:
@@ -932,7 +964,6 @@ Output only the alt text, no explanations.
                             alt_text = run_ai_vision(engine_choice, img_pil, alt_prompt, api_key, sel_model).strip()
                             image_alts.append({"filename": img_file.name, "alt": alt_text})
                     
-                    # 保存到session state
                     st.session_state.seo_metadata = {
                         "url_slug": url_slug,
                         "meta_description": meta_description,
@@ -946,14 +977,12 @@ Output only the alt text, no explanations.
                 
                 except Exception as e:
                     st.error(f"❌ 生成失败: {str(e)}")
-                    st.exception(e)  # 显示详细错误信息
+                    st.exception(e)
     
-    # 显示结果
     if st.session_state.seo_metadata:
         st.divider()
         st.markdown("## 📊 生成结果")
         
-        # SEO元数据展示
         with st.expander("📝 SEO元数据（复制到WordPress/CMS）", expanded=True):
             col_meta1, col_meta2 = st.columns(2)
             
@@ -986,7 +1015,6 @@ Output only the alt text, no explanations.
                     help="用于文章预览和分享"
                 )
             
-            # 图片Alt文本
             if st.session_state.seo_metadata['image_alts']:
                 st.markdown("**🖼️ 图片Alt文本优化:**")
                 for idx, img_alt in enumerate(st.session_state.seo_metadata['image_alts']):
@@ -996,7 +1024,6 @@ Output only the alt text, no explanations.
                         key=f"alt_{idx}"
                     )
             
-            # 一键复制所有元数据
             all_metadata = f"""
 === SEO元数据 ===
 URL Slug: {st.session_state.seo_metadata['url_slug']}
@@ -1024,7 +1051,6 @@ Excerpt:
                 use_container_width=True
             )
         
-        # HTML内容展示
         tab_preview, tab_code, tab_score = st.tabs(["👁️ 预览", "💻 HTML代码", "📊 SEO评分"])
         
         with tab_preview:
@@ -1063,8 +1089,5 @@ Excerpt:
             else:
                 st.success("🎉 SEO优化良好！")
 
-# ==========================================
-# 底部信息
-# ==========================================
 st.divider()
-st.caption(f"🦁 {cinfo['name']} 运营中台 V29.1 | Powered by {engine_choice} ({sel_model})")
+st.caption(f"🦁 {cinfo['name']} 运营中台 V29.2 | Powered by {engine_choice} ({sel_model})")
