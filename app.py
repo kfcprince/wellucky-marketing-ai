@@ -15,22 +15,20 @@ import uuid
 import re
 
 # ==========================================
-# 0. 初始化系统缓存 (防止 AttributeError)
+# 0. 初始化系统环境
 # ==========================================
 if 'results' not in st.session_state:
     st.session_state.results = []
 
 # ==========================================
-# 1. 核心配置与脱敏读取
+# 1. 核心配置
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
     ALI_API_KEY = st.secrets["ALI_API_KEY"]
     ZHIPU_API_KEY = st.secrets["ZHIPU_API_KEY"]
 except:
-    GOOGLE_API_KEY = ""
-    ALI_API_KEY = ""
-    ZHIPU_API_KEY = ""
+    GOOGLE_API_KEY = ALI_API_KEY = ZHIPU_API_KEY = ""
 
 BIZ_CONFIG = {
     "logistics": {
@@ -52,7 +50,35 @@ BIZ_CONFIG = {
 }
 
 # ==========================================
-# 2. 核心处理工具
+# 2. 增强型命名清洗函数 (核心修复)
+# ==========================================
+def get_clean_seo_name(ai_raw_text, brand_name):
+    """
+    将 AI 返回的乱七八糟的文本转换为标准的品牌-关键词-关键词格式
+    """
+    if not ai_raw_text or "Error" in ai_raw_text:
+        return f"{brand_name.lower()}-{uuid.uuid4().hex[:5]}"
+    
+    # 1. 全部转为小写
+    text = ai_raw_text.lower()
+    # 2. 彻底剔除常见的图片后缀，防止出现 logojpg 这种情况
+    text = re.sub(r'\.(jpg|jpeg|png|webp|gif|bmp)', '', text)
+    # 3. 将所有非字母和非数字的字符（包括标点、空格、特殊符号）都替换为空格
+    text = re.sub(r'[^a-z0-9]', ' ', text)
+    # 4. 分词并去除极其短的无意义词（比如 a, an, the, is）
+    words = [w for w in text.split() if len(w) > 1]
+    
+    # 5. 确保品牌词在最前面（如果 AI 没返回品牌词，手动加上）
+    brand = brand_name.lower()
+    if brand not in words:
+        words.insert(0, brand)
+    
+    # 6. 使用连字符连接，并限制长度防止文件名过长
+    clean_name = "-".join(words)
+    return clean_name[:60] # 限制 60 个字符
+
+# ==========================================
+# 3. 核心工具函数
 # ==========================================
 def clean_text(text):
     if not text: return ""
@@ -119,7 +145,7 @@ def run_ai(engine, img, prompt, key, model):
         except: return "Error_Ali"
 
 # ==========================================
-# 3. UI 布局
+# 4. UI 布局
 # ==========================================
 st.set_page_config(page_title="狮子营销助手", layout="wide")
 
@@ -153,24 +179,23 @@ with tab1:
             st.session_state.results = []
             for f in files:
                 img = Image.open(f)
-                pn = f"Generate a 3-word SEO filename for this image. Include '{cinfo['name'].lower()}'. Hyphens only."
+                pn = f"Analyze this image and provide 3 keywords for SEO. Only words, no punctuation. Include brand '{cinfo['name']}'."
                 rn = run_ai(etype, img, pn, ekey, sel_mod)
-                cn = re.sub(r'[^a-z0-9\-]', '', rn.lower().replace(" ","-")) if "Error" not in rn else f"img-{uuid.uuid4().hex[:5]}"
-                st.session_state.results.append({"img": img, "name": f"{cn}.webp", "data": convert_image(img), "text": ""})
+                final_name = get_clean_seo_name(rn, cinfo['name'])
+                st.session_state.results.append({"img": img, "name": f"{final_name}.webp", "data": convert_image(img), "text": ""})
 
     if b2.button("🚀 全套处理", type="primary", use_container_width=True, key="btn_all"):
         if files:
             st.session_state.results = []
             for f in files:
                 img = Image.open(f)
-                pn = f"SEO filename for '{cinfo['name'].lower()}'. 3 keywords."
+                pn = f"3 keywords for SEO image filename. Include brand '{cinfo['name']}'."
                 rn = run_ai(etype, img, pn, ekey, sel_mod)
-                cn = re.sub(r'[^a-z0-9\-]', '', rn.lower().replace(" ","-")) if "Error" not in rn else f"img-{uuid.uuid4().hex[:5]}"
+                final_name = get_clean_seo_name(rn, cinfo['name'])
                 pt = f"Professional {plat} post for {cinfo['full_name']}. Based on: {draft}. Web: {cinfo['website']}."
                 txt = run_ai(etype, img, pt, ekey, sel_mod)
-                st.session_state.results.append({"img": img, "name": f"{cn}.webp", "data": convert_image(img), "text": txt})
+                st.session_state.results.append({"img": img, "name": f"{final_name}.webp", "data": convert_image(img), "text": txt})
 
-    # 显示结果区
     for i, res in enumerate(st.session_state.results):
         r_l, r_r = st.columns([1, 2])
         r_l.image(res['img'], use_container_width=True)
@@ -193,13 +218,12 @@ with tab2:
         cr.download_button("保存封面", bio.getvalue(), "cover.png", key="dl_tab2")
 
 with tab3:
-    st.subheader("🌍 GEO 专家 (中译英 + HTML + Schema)")
-    raw_tx = st.text_area("输入发货记录或中文草稿", height=250, key="tx_tab3")
-    geo_u = st.file_uploader("上传对应实拍图 (可选)", type=['jpg', 'png'], key="u_tab3")
+    st.subheader("🌍 GEO 专家")
+    raw_tx = st.text_area("输入发货记录", height=250, key="tx_tab3")
     if st.button("✨ 执行深度优化", type="primary", key="btn_tab3"):
         if raw_tx:
-            with st.spinner("AI 专家正在处理..."):
-                gp = f"As a Senior SEO expert, translate/refine this into professional English. Format in HTML with <h2>, <ul>. Provide FAQ Schema. Content: {raw_tx}"
-                res = run_ai(etype, Image.open(geo_u) if geo_u else None, gp, ekey, sel_mod)
+            with st.spinner("处理中..."):
+                gp = f"As a Senior SEO expert, translate/refine this into professional English. Use HTML. Content: {raw_tx}"
+                res = run_ai(etype, None, gp, ekey, sel_mod)
                 st.markdown("### 💎 优化结果")
                 st.write(res)
