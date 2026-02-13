@@ -1,57 +1,35 @@
 import streamlit as st
 import google.generativeai as genai
 import dashscope 
-from dashscope import MultiModalConversation, ImageSynthesis
-from zhipuai import ZhipuAI
-from PIL import Image, ImageEnhance, ImageDraw, ImageFont
-import io, base64, uuid, re, os, requests
+from dashscope import ImageSynthesis
+from PIL import Image, ImageDraw, ImageFont
+import io, re, os, requests, uuid
 
 # ==========================================
 # 0. 初始化与页面配置
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V28.1", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V28.3", layout="wide", page_icon="🦁")
 
-# 状态初始化
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
 
 # ==========================================
-# 1. 核心配置与工具函数
+# 1. 核心配置与工具
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", "")
     ALI_API_KEY = st.secrets.get("ALI_API_KEY", "")
-    ZHIPU_API_KEY = st.secrets.get("ZHIPU_API_KEY", "")
 except:
-    GOOGLE_API_KEY = ALI_API_KEY = ZHIPU_API_KEY = ""
+    GOOGLE_API_KEY = ALI_API_KEY = ""
 
 BIZ_CONFIG = {
-    "logistics": {"name": "VastLog", "website": "www.vastlog.com", "color": "#FF9900"},
-    "house": {"name": "Wellucky", "website": "www.wellucky.com", "color": "#0066CC"}
+    "logistics": {"name": "VastLog", "website": "www.vastlog.com", "color": "#FF9900", "type": "LogisticsService"},
+    "house": {"name": "Wellucky", "website": "www.wellucky.com", "color": "#0066CC", "type": "Product"}
 }
 
-# --- 字体加载辅助函数 (解决无法调整大小问题) ---
 def get_font(size):
-    # 尝试加载常见字体，Streamlit Cloud 通常有 DejaVuSans
-    possible_fonts = ["DejaVuSans-Bold.ttf", "arial.ttf", "Roboto-Bold.ttf"]
-    for f in possible_fonts:
-        try:
-            return ImageFont.truetype(f, size)
-        except:
-            continue
-    return ImageFont.load_default() # 如果都失败，回退到默认（不可调大小）
-
-# --- 核心：文件名清洗 (保留 V27 逻辑) ---
-def get_clean_seo_name(ai_res, brand):
-    if not ai_res or "Error" in ai_res: return f"{brand.lower()}-item-{uuid.uuid4().hex[:4]}"
-    name = ai_res.lower()
-    name = re.sub(r'[^a-z0-9]', ' ', name)
-    stop_words = {'this', 'appears', 'to', 'be', 'an', 'a', 'the', 'is', 'of', 'view', 'image', 'photo', 'picture'}
-    words = [w for w in name.split() if len(w) > 2 and w not in stop_words]
-    brand_low = brand.lower()
-    if brand_low in words: words.remove(brand_low)
-    words.insert(0, brand_low)
-    return "-".join(words[:6])
+    try: return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+    except: return ImageFont.load_default()
 
 def convert_to_webp(image):
     buf = io.BytesIO()
@@ -59,245 +37,213 @@ def convert_to_webp(image):
     image.save(buf, format='WEBP', quality=80)
     return buf.getvalue()
 
-def run_ai_vision(engine, img, prompt, key, model):
-    if not key: return "Error: No Key"
-    try:
-        if engine == "google":
-            genai.configure(api_key=key)
-            m = genai.GenerativeModel(model)
-            res = m.generate_content([prompt, img])
-            return res.text
-        elif engine == "ali":
-            dashscope.api_key = key
-            tmp_p = f"v_{uuid.uuid4().hex}.png"; img.save(tmp_p)
-            url = f"file://{os.path.abspath(tmp_p).replace('\\', '/')}"
-            res = MultiModalConversation.call(model=model, messages=[{"role":"user","content":[{"image":url},{"text":prompt}]}])
-            if os.path.exists(tmp_p): os.remove(tmp_p)
-            return res.output.choices[0].message.content[0]['text']
-        else: # 智谱
-            client = ZhipuAI(api_key=key)
-            # 略...为了代码简洁，逻辑同上
-            return "Zhipu Logic Placeholder"
-    except Exception as e: return f"Error: {str(e)}"
+def get_clean_seo_name(ai_res, brand):
+    if not ai_res or "Error" in ai_res: return f"{brand.lower()}-item-{uuid.uuid4().hex[:4]}"
+    name = ai_res.lower()
+    name = re.sub(r'[^a-z0-9]', ' ', name)
+    words = [w for w in name.split() if len(w) > 2 and w not in {'this','image','photo'}]
+    brand_low = brand.lower()
+    if brand_low in words: words.remove(brand_low)
+    words.insert(0, brand_low)
+    return "-".join(words[:6])
 
 # ==========================================
-# 2. 侧边栏配置
+# 2. 侧边栏配置 (核心修改：模型名称可配置)
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 核心设置")
+    st.title("⚙️ 核心设置 V28.3")
+    
+    # 业务选择
     biz_choice = st.radio("🏢 业务模式", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"))
     cbiz = "logistics" if "VastLog" in biz_choice else "house"
     cinfo = BIZ_CONFIG[cbiz]
     
     st.divider()
-    engine_choice = st.radio("🧠 AI 引擎", ("Google Gemini", "阿里通义"))
-    if "Google" in engine_choice:
-        etype, mlist, ekey = "google", ["gemini-1.5-flash"], GOOGLE_API_KEY
-    else:
-        etype, mlist, ekey = "ali", ["qwen-vl-max"], ALI_API_KEY
-    sel_mod = st.selectbox("模型版本", mlist)
+    
+    # --- 模型配置 (修复 NotFound 问题的关键) ---
+    st.markdown("### 🧠 AI 模型配置")
+    st.info("如果遇到 NotFound 报错，请确认此处填写的模型名称与您 Google API 权限一致。")
+    # 默认给 2.0-flash，您可以随时改为 2.5-flash 或其他
+    gemini_model_name = st.text_input("Google 模型名称", value="gemini-2.0-flash") 
 
 # ==========================================
 # 3. 主功能区
 # ==========================================
-st.markdown(f"### 🦁 {cinfo['name']} 数字化运营 V28.1")
-tab1, tab2, tab3 = st.tabs(["✍️ Tab 1: 智能文案", "🎨 Tab 2: 封面工厂", "🌍 Tab 3: GEO 专家"])
+st.markdown(f"### 🦁 {cinfo['name']} 数字化运营 V28.3")
+tab1, tab2, tab3 = st.tabs(["✍️ Tab 1: 智能文案", "🎨 Tab 2: 封面工厂", "🌍 Tab 3: GEO/EEAT 专家"])
 
 # ----------------------------------------------------------------
-# Tab 1: 智能文案 (功能已恢复：仅重命名 vs 全套)
+# Tab 1: 智能文案
 # ----------------------------------------------------------------
 with tab1:
     c1, c2 = st.columns([1, 1])
-    with c1:
-        files = st.file_uploader("📂 上传图片 (批量)", accept_multiple_files=True, key="t1_up")
+    files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1_up")
     with c2:
-        draft = st.text_area("📝 文案重点 (仅全套模式生效)", placeholder="例：美国DDP专线，时效15天...")
-        
-        # --- 恢复两个独立按钮 ---
+        draft = st.text_area("文案重点 (仅全套模式生效)", height=100)
         b1, b2 = st.columns(2)
-        btn_rename = b1.button("🖼️ 仅识图起名 (SEO)", use_container_width=True)
-        btn_full = b2.button("🚀 全套处理 (含贴文)", type="primary", use_container_width=True)
+        btn_rename = b1.button("🖼️ 仅识图起名", use_container_width=True)
+        btn_full = b2.button("🚀 全套处理", type="primary", use_container_width=True)
 
-    if (btn_rename or btn_full) and files:
-        st.session_state.results_tab1 = [] # 清空旧数据
-        
-        prompt_seo = f"Identify product in image. Output format: {cinfo['name']}-keyword-keyword. No sentences."
-        prompt_copy = f"Write a professional Facebook post for {cinfo['name']}. Context: {draft}."
+    if (btn_rename or btn_full) and files_t1:
+        st.session_state.results_tab1 = []
+        genai.configure(api_key=GOOGLE_API_KEY)
+        # 使用侧边栏配置的模型名
+        try:
+            model = genai.GenerativeModel(gemini_model_name)
+            
+            prompt_seo = f"Identify product. Output format: {cinfo['name']}-keyword-keyword. No sentences."
+            bar = st.progress(0)
+            
+            for i, f in enumerate(files_t1):
+                img = Image.open(f)
+                
+                # 1. 起名
+                try:
+                    raw_name = model.generate_content([prompt_seo, img]).text
+                    clean_name = get_clean_seo_name(raw_name, cinfo['name'])
+                except Exception as e:
+                    clean_name = f"{cinfo['name']}-err-{uuid.uuid4().hex[:4]}"
+                    st.error(f"起名失败 (图片 {i+1}): {str(e)}")
 
-        progress = st.progress(0)
-        for i, f in enumerate(files):
-            img = Image.open(f)
-            
-            # 1. 必做：识图起名
-            raw_name = run_ai_vision(etype, img, prompt_seo, ekey, sel_mod)
-            clean_name = get_clean_seo_name(raw_name, cinfo['name'])
-            
-            # 2. 选做：文案生成
-            copy_text = ""
-            if btn_full:
-                copy_text = run_ai_vision(etype, img, prompt_copy, ekey, sel_mod)
-            
-            st.session_state.results_tab1.append({
-                "img": img, "name": f"{clean_name}.webp", "text": copy_text, "data": convert_to_webp(img)
-            })
-            progress.progress((i+1)/len(files))
+                # 2. 文案
+                copy_text = ""
+                if btn_full:
+                    p_copy = f"Write professional FB post for {cinfo['name']}. Context: {draft}."
+                    try: copy_text = model.generate_content([p_copy, img]).text
+                    except: pass
+                
+                st.session_state.results_tab1.append({
+                    "img": img, "name": f"{clean_name}.webp", "text": copy_text, "data": convert_to_webp(img)
+                })
+                bar.progress((i+1)/len(files_t1))
+        except Exception as e:
+            st.error(f"模型初始化失败，请检查模型名称: {str(e)}")
 
-    # 结果展示
     if st.session_state.results_tab1:
         st.divider()
         for res in st.session_state.results_tab1:
             lc, rc = st.columns([1, 3])
-            lc.image(res['img'], use_container_width=True)
+            lc.image(res['img'], width=150)
             with rc:
                 st.code(res['name'], language="bash")
-                if res['text']:
-                    st.text_area("FB Copy", res['text'], height=100)
+                if res['text']: st.text_area("Copy", res['text'], height=80)
                 st.download_button("下载 WebP", res['data'], file_name=res['name'])
 
 # ----------------------------------------------------------------
-# Tab 2: 封面工厂 (功能已恢复：AI生图 + 3标题独立控制)
+# Tab 2: 封面工厂 (保持)
 # ----------------------------------------------------------------
 with tab2:
-    st.caption("功能：AI 生成背景 或 上传背景 + 3个独立标题控制")
-    
-    # --- A. 背景来源 ---
     bg_col1, bg_col2 = st.columns([1, 1])
     with bg_col1:
         st.markdown("#### A. 背景来源")
-        bg_mode = st.radio("选择模式", ["上传本地图片", "AI 文生图 (Wanx)"], horizontal=True)
-        
+        bg_mode = st.radio("模式", ["上传图片", "AI 生图 (Wanx)"], horizontal=True)
         bg_image = None
-        
-        if bg_mode == "上传本地图片":
-            bg_file = st.file_uploader("上传背景图", type=['jpg', 'png', 'webp'])
-            if bg_file: bg_image = Image.open(bg_file).convert("RGBA")
-            
-        else: # AI 生图
-            ai_prompt = st.text_input("输入画面描述 (例如: container ship at sunset)", value="futuristic container ship on ocean")
-            if st.button("🎨 生成背景图"):
-                if not ALI_API_KEY:
-                    st.error("需要配置阿里 API Key")
+        if bg_mode == "上传图片":
+            f = st.file_uploader("背景图", key="t2_up")
+            if f: bg_image = Image.open(f).convert("RGBA")
+        else:
+            p = st.text_input("画面描述", "container ship at sea")
+            if st.button("生成背景"):
+                if not ALI_API_KEY: st.error("缺阿里 Key")
                 else:
-                    try:
-                        with st.spinner("AI 正在绘图..."):
-                            dashscope.api_key = ALI_API_KEY
-                            rsp = ImageSynthesis.call(model=ImageSynthesis.Models.wanx_v1, prompt=ai_prompt, n=1, size='1024*1024')
-                            if rsp.status_code == 200:
-                                img_url = rsp.output.results[0].url
-                                # 下载图片
-                                bg_content = requests.get(img_url).content
-                                st.session_state.generated_bg = Image.open(io.BytesIO(bg_content)).convert("RGBA")
-                            else:
-                                st.error(f"生图失败: {rsp.message}")
-                    except Exception as e: st.error(str(e))
-            
-            if st.session_state.generated_bg:
-                bg_image = st.session_state.generated_bg
-                st.success("AI 背景图已就绪")
+                    dashscope.api_key = ALI_API_KEY
+                    rsp = ImageSynthesis.call(model=ImageSynthesis.Models.wanx_v1, prompt=p, n=1, size='1024*1024')
+                    if rsp.status_code==200:
+                        st.session_state.generated_bg = Image.open(io.BytesIO(requests.get(rsp.output.results[0].url).content)).convert("RGBA")
+            if st.session_state.generated_bg: bg_image = st.session_state.generated_bg
 
-    # --- B. 3个独立标题控制 (恢复需求) ---
     with bg_col2:
-        st.markdown("#### B. 文字图层控制")
-        
-        # 标题 1
-        with st.expander("标题 1 (主标题)", expanded=True):
-            t1_text = st.text_input("内容", "VastLog Global")
-            c1_a, c1_b, c1_c = st.columns(3)
-            t1_size = c1_a.number_input("大小", 20, 200, 80, key="s1")
-            t1_color = c1_b.color_picker("颜色", "#FFFFFF", key="c1")
-            t1_y = c1_c.slider("垂直位置 Y", 0, 1000, 100, key="y1")
+        st.markdown("#### B. 标题控制")
+        with st.expander("标题 1", expanded=True):
+            t1_t = st.text_input("Txt1", "Global Logistics"); t1_s = st.number_input("Size1", 20,200,80); t1_c = st.color_picker("Clr1", "#FFF"); t1_y = st.slider("Y1", 0,1000,100)
+        with st.expander("标题 2"):
+            t2_t = st.text_input("Txt2", "DDP Service"); t2_s = st.number_input("Size2", 20,200,50); t2_c = st.color_picker("Clr2", cinfo['color']); t2_y = st.slider("Y2", 0,1000,250)
+        with st.expander("标题 3"):
+            t3_t = st.text_input("Txt3", "Fast & Safe"); t3_s = st.number_input("Size3", 20,200,30); t3_c = st.color_picker("Clr3", "#FF0"); t3_y = st.slider("Y3", 0,1000,350)
 
-        # 标题 2
-        with st.expander("标题 2 (副标题)"):
-            t2_text = st.text_input("内容", "DDP Shipping", key="txt2")
-            c2_a, c2_b, c2_c = st.columns(3)
-            t2_size = c2_a.number_input("大小", 20, 200, 50, key="s2")
-            t2_color = c2_b.color_picker("颜色", cinfo['color'], key="c2") # 默认品牌色
-            t2_y = c2_c.slider("垂直位置 Y", 0, 1000, 250, key="y2")
-
-        # 标题 3
-        with st.expander("标题 3 (装饰/角标)"):
-            t3_text = st.text_input("内容", "FAST & SAFE", key="txt3")
-            c3_a, c3_b, c3_c = st.columns(3)
-            t3_size = c3_a.number_input("大小", 20, 200, 30, key="s3")
-            t3_color = c3_b.color_picker("颜色", "#FFFF00", key="c3")
-            t3_y = c3_c.slider("垂直位置 Y", 0, 1000, 350, key="y3")
-
-    # --- C. 合成逻辑 ---
     if bg_image:
         st.divider()
-        st.markdown("#### C. 最终合成预览")
-        
-        # 创建画布
-        final_img = bg_image.copy()
-        draw = ImageDraw.Draw(final_img)
-        W, H = final_img.size
-        
-        # 简单的阴影效果偏移量
-        shadow_offset = 3
-        
-        # 绘制函数
-        def draw_text(text, size, color, y_pos):
-            if not text: return
-            font = get_font(int(size))
-            # 计算居中 X
-            try:
-                # Pillow >= 10.0
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_w = bbox[2] - bbox[0]
-            except:
-                # 旧版 Pillow
-                text_w = draw.textlength(text, font=font)
-            
-            x_pos = (W - text_w) / 2
-            
-            # 绘制阴影 (黑色)
-            draw.text((x_pos + shadow_offset, y_pos + shadow_offset), text, font=font, fill="#000000")
-            # 绘制正文
-            draw.text((x_pos, y_pos), text, font=font, fill=color)
-
-        draw_text(t1_text, t1_size, t1_color, t1_y)
-        draw_text(t2_text, t2_size, t2_color, t2_y)
-        draw_text(t3_text, t3_size, t3_color, t3_y)
-
-        # 展示
+        final_img = bg_image.copy(); draw = ImageDraw.Draw(final_img); W,H = final_img.size
+        def dr(t,s,c,y):
+            if not t: return
+            f = get_font(int(s))
+            try: w = draw.textlength(t, font=f)
+            except: w = draw.textbbox((0,0),t,font=f)[2]
+            x = (W-w)/2
+            draw.text((x+3,y+3),t,font=f,fill="black"); draw.text((x,y),t,font=f,fill=c)
+        dr(t1_t,t1_s,t1_c,t1_y); dr(t2_t,t2_s,t2_c,t2_y); dr(t3_t,t3_s,t3_c,t3_y)
         st.image(final_img, use_container_width=True)
-        
-        # 下载
-        buf = io.BytesIO()
-        final_img.convert("RGB").save(buf, format="JPEG", quality=95)
-        st.download_button("📥 下载最终封面", buf.getvalue(), file_name=f"cover-{cinfo['name']}.jpg")
+        buf=io.BytesIO(); final_img.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
 
 # ----------------------------------------------------------------
-# Tab 3: GEO 专家 (独立输入，互不影响)
+# Tab 3: GEO 专家 (核心修复：动态模型 + 中译英 + 插图)
 # ----------------------------------------------------------------
 with tab3:
-    st.caption("功能：生成符合 EEAT 标准的 HTML/JSON-LD 代码")
+    st.caption(f"当前使用模型: {gemini_model_name} | 功能：中文转英文 + EEAT + 自动插图")
     
-    t3_txt = st.text_area("输入产品/服务详情", height=150, placeholder="支持直接粘贴 Tab 1 的结果，或手动输入...")
-    
-    if st.button("生成 GEO 代码"):
-        if not t3_txt:
-            st.warning("请先输入内容")
+    c3_in1, c3_in2 = st.columns([1, 1])
+    with c3_in1:
+        cn_text = st.text_area("📝 中文原文", height=300, placeholder="例如：集装箱房屋安装步骤说明...")
+    with c3_in2:
+        uploaded_imgs = st.file_uploader("🖼️ 文章配图", accept_multiple_files=True, key="t3_imgs")
+        st.info("💡 提示：AI 将阅读这些图片，并将其插入到英文文章的逻辑位置中。")
+
+    if st.button("✨ 生成 GEO 英文代码", type="primary"):
+        if not cn_text:
+            st.warning("⚠️ 请输入中文内容")
         else:
-            prompt_geo = f"""
-            You are an SEO Expert for {cinfo['name']}.
-            Input: {t3_txt}
-            Requirements:
-            1. Generate HTML Article with <h2 style="border-left: 5px solid {cinfo['color']}; padding-left: 10px;">Title</h2>.
-            2. Generate JSON-LD schema for {cbiz} business.
-            """
-            
-            # 这里简单用 Gemini 演示
-            if etype == "google":
-                genai.configure(api_key=ekey)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                res = model.generate_content(prompt_geo).text
+            try:
+                genai.configure(api_key=GOOGLE_API_KEY)
+                # 使用侧边栏自定义的模型名
+                model = genai.GenerativeModel(gemini_model_name)
                 
-                c_code, c_view = st.columns(2)
-                with c_code:
-                    st.code(res, language="html")
-                with c_view:
-                    st.markdown(res, unsafe_allow_html=True)
-            else:
-                st.info("Demo模式：请在 Tab 3 使用 Google 引擎以获得最佳 SEO 效果")
+                # 构建多模态 Prompt
+                # 1. 系统指令
+                sys_prompt = f"""
+                You are a Senior Content Expert for {cinfo['name']} ({cinfo['type']}).
+                Task: Translate the user's CHINESE text to English, then format it as a high-quality SEO Article.
+                
+                Guidelines:
+                1. **Translation**: Accurate meaning, but professional/native tone. NO Chinglish.
+                2. **Formatting**:
+                   - Use <h2> tags: <h2 style="border-left: 5px solid {cinfo['color']}; padding-left: 10px;">Title</h2>
+                   - Use <p> for text.
+                3. **Images**:
+                   - I have provided images. Insert them into the HTML where they make sense contextually.
+                   - Format: <img src="[filename]" alt="[AI Generated Descriptive Alt Text]" style="width:100%; border-radius:8px; margin:20px 0;">
+                   - Use the exact filenames of the uploaded images.
+                4. **Schema**:
+                   - Add <script type="application/ld+json"> at the end.
+                   - Type: {cinfo['type']}. Brand: {cinfo['name']}.
+                """
+                
+                content_parts = [sys_prompt, "\n\nInput Chinese Text:\n" + cn_text]
+                
+                # 2. 附加图片
+                if uploaded_imgs:
+                    content_parts.append("\n\nAvailable Images for Insertion:")
+                    for img_f in uploaded_imgs:
+                        p_img = Image.open(img_f)
+                        content_parts.append(f"\nFilename: {img_f.name}")
+                        content_parts.append(p_img) # 直接传入 PIL 对象
+                
+                with st.spinner(f"正在调用 {gemini_model_name} 进行深度处理..."):
+                    response = model.generate_content(content_parts)
+                    res_html = response.text
+                    
+                    st.success("✅ 处理完成")
+                    
+                    # 结果分栏
+                    vc, cc = st.columns([1, 1])
+                    with vc:
+                        st.markdown("### 👁️ 效果预览")
+                        st.markdown(res_html, unsafe_allow_html=True)
+                        st.caption("*注：图片需上传到网站后台后才能正常显示")
+                    with cc:
+                        st.markdown("### 💻 HTML 代码")
+                        st.code(res_html, language="html")
+
+            except Exception as e:
+                st.error(f"❌ 调用失败: {str(e)}")
+                if "NotFound" in str(e):
+                    st.warning(f"请检查左侧边栏输入的模型名称 '{gemini_model_name}' 是否正确。")
