@@ -3,4 +3,7 @@ google-generativeai
 zhipuai
 dashscope
 Pillow
-requests
+httpx
+pydantic
+sniffio
+anyio
