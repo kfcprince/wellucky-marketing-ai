@@ -508,7 +508,7 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# Tab 1: 智能文案生成（优化后的Prompt）
+# Tab 1: 智能文案生成
 # ==========================================
 with tab1:
     st.markdown("### 📝 批量图片识别 + 社媒文案生成")
@@ -555,46 +555,14 @@ with tab1:
             help="识别图片 + 生成社媒文案 + 转WebP"
         )
     
+    # 处理逻辑
     if (btn_rename_only or btn_full_process) and files_t1:
         if not api_key:
             st.error("❌ 请先在Streamlit Secrets中配置API Key！")
         else:
             st.session_state.results_tab1 = []
             
-            # 🔥 优化后的Prompt - 更严格的格式要求
-            prompt_naming = f"""
-You are a professional SEO filename generator for {cinfo['name']} ({cinfo['type']}).
-
-Analyze this product image and output ONLY a filename following this EXACT format:
-{cinfo['name'].lower()}-keyword1-keyword2-keyword3-keyword4
-
-STRICT RULES:
-1. Start with: {cinfo['name'].lower()}-
-2. Add 3-5 descriptive keywords separated by hyphens
-3. Keywords should describe:
-   - Product category: {', '.join(cinfo['keywords'][:4])}
-   - Material/feature: steel, aluminum, white, blue, modern, portable
-   - View/angle: exterior, interior, front, side, aerial
-4. Use ONLY lowercase letters (a-z)
-5. NO spaces, NO underscores, ONLY hyphens (-)
-6. NO generic words: image, photo, picture, view, showing, this
-7. NO file extensions (.webp, .jpg, .png)
-8. NO numbers or codes unless describing a model
-
-GOOD examples:
-{cinfo['name'].lower()}-container-house-white-exterior
-{cinfo['name'].lower()}-modular-office-steel-frame
-{cinfo['name'].lower()}-portable-cabin-modern-design
-{cinfo['name'].lower()}-prefab-building-blue-facade
-
-BAD examples (DO NOT DO THIS):
-container house with white walls
-This is a {cinfo['name']} product
-{cinfo['name']}-image-0532.webp
-
-Output ONLY the filename in the correct format. No explanations, no extra text.
-Filename:"""
-
+            # 社媒文案Prompt
             platform_rule = PLATFORM_RULES[platform_choice]
             prompt_copywriting = f"""
 You are a social media expert for {cinfo['name']} ({cinfo['type']}).
@@ -614,25 +582,23 @@ Write the post directly, no explanations.
             progress_bar = st.progress(0)
             status_text = st.empty()
             
+            # 🔄 循环处理每张图片
             for idx, uploaded_file in enumerate(files_t1):
-    status_text.text(f"处理中: {uploaded_file.name} ({idx+1}/{len(files_t1)})")
-    
-    img = Image.open(uploaded_file).convert("RGB")
-    
-    # 1. 图片识别并重命名（使用新的智能函数）
-    clean_filename = generate_seo_filename_smart(
-        engine=engine_choice,
-        img=img,
-        brand=cinfo['name'],
-        business_type=cbiz,
-        api_key=api_key,
-        model_name=sel_model
-    ) + ".webp"
-    
-    # 保存原始AI响应用于调试
-    raw_ai_response = f"[使用智能命名函数，基于Few-Shot Learning]"
+                status_text.text(f"处理中: {uploaded_file.name} ({idx+1}/{len(files_t1)})")
                 
-                # 2. 生成文案
+                img = Image.open(uploaded_file).convert("RGB")
+                
+                # 1. 图片识别并重命名（使用智能函数）
+                clean_filename = generate_seo_filename_smart(
+                    engine=engine_choice,
+                    img=img,
+                    brand=cinfo['name'],
+                    business_type=cbiz,
+                    api_key=api_key,
+                    model_name=sel_model
+                ) + ".webp"
+                
+                # 2. 生成文案（如果选择完整处理）
                 copywriting_text = ""
                 if btn_full_process:
                     copywriting_text = run_ai_vision(engine_choice, img, prompt_copywriting, api_key, sel_model)
@@ -640,15 +606,16 @@ Write the post directly, no explanations.
                 # 3. 转换为WebP
                 webp_data = convert_to_webp(img)
                 
+                # 保存结果
                 st.session_state.results_tab1.append({
                     "original_name": uploaded_file.name,
                     "img": img,
                     "new_name": clean_filename,
                     "copy_text": copywriting_text,
-                    "webp_data": webp_data,
-                    "raw_ai_response": raw_response  # 保存原始响应
+                    "webp_data": webp_data
                 })
                 
+                # 更新进度条
                 progress_bar.progress((idx + 1) / len(files_t1))
             
             status_text.text("✅ 处理完成！")
@@ -674,32 +641,11 @@ Write the post directly, no explanations.
                     )
                 
                 with col_content:
-                    # 显示调试信息
-    with st.expander("🔍 调试信息", expanded=False):
-        st.caption("使用了Few-Shot智能命名函数")
-        st.caption(f"品牌: {cinfo['name']} | 业务: {cbiz}")
-    
-    st.text_input("SEO文件名", value=result['new_name'], key=f"name_{idx}")
-```
-
----
-
-## 🧪 测试步骤
-
-### **测试1：上传集装箱房屋图片**
-
-1. 选择 Wellucky 业务
-2. 选择你常用的AI引擎（比如阿里通义）
-3. 上传1-2张集装箱房屋的图片
-4. 点击"仅识图重命名"
-
-**预期结果：**
-```
-✅ wellucky-container-house-white-exterior.webp
-✅ wellucky-modular-building-blue-steel.webp
-
-而不是：
-❌ wellucky-item-36c8.webp
+                    # 调试信息
+                    with st.expander("🔍 调试信息", expanded=False):
+                        st.caption(f"✨ 使用Few-Shot智能命名")
+                        st.caption(f"品牌: {cinfo['name']} | 业务: {cbiz}")
+                    
                     st.text_input("SEO文件名", value=result['new_name'], key=f"name_{idx}")
                     
                     if result['copy_text']:
@@ -710,10 +656,10 @@ Write the post directly, no explanations.
                             key=f"copy_{idx}"
                         )
                         
+                        # 文案统计
                         char_count = len(result['copy_text'])
                         hashtag_count = result['copy_text'].count('#')
                         st.caption(f"📊 字符数: {char_count} | Hashtags: {hashtag_count}")
-
 # Tab 2 和 Tab 3 保持不变...
 # （由于字数限制，这里省略，你可以直接复制之前的Tab 2和Tab 3代码）
 
@@ -1249,4 +1195,5 @@ Excerpt:
 
 st.divider()
 st.caption(f"🦁 {cinfo['name']} 运营中台 V29.2 | Powered by {engine_choice} ({sel_model})")
+
 
