@@ -229,7 +229,22 @@ with tab1:
         link = generate_utm(cur_info['website'], platform, cur_biz)
         for f in u_files:
             img = Image.open(f)
-            name = run_text_engine(eng_type, img, get_prompt(cur_info, platform, "", "", "name"), cur_key, sel_mod)
+            # 找到这一行并替换逻辑：
+name = run_text_engine(eng_type, img, get_prompt(cur_info, platform, "", "", "name"), cur_key, sel_mod)
+
+# 新的清理逻辑：确保文件名是干净的 SEO 格式
+if not name or "Error" in name or len(name) > 100:
+    # 备用方案：如果 AI 抽风，才使用随机数
+    name = f"{cur_info['name'].lower()}-{uuid.uuid4().hex[:5]}"
+else:
+    # 清理 AI 可能返回的标点、空格或换行
+    name = name.lower().replace(" ", "-").replace("_", "-").replace(".webp", "").strip()
+    # 过滤掉非法字符
+    import re
+    name = re.sub(r'[^a-z0-9\-]', '', name)
+
+# 最终拼接后缀
+res_name = f"{name}.webp"
             name = f"{cur_info['name'].lower()}-{uuid.uuid4().hex[:5]}.webp" if not name or len(name)>50 else name+".webp"
             text = run_text_engine(eng_type, img, get_prompt(cur_info, platform, draft, link, "content"), cur_key, sel_mod) if btn_all else ""
             st.session_state.results.append({"img": img, "name": name, "data": convert_image(img), "text": text})
@@ -317,6 +332,7 @@ with tab3:
                     st.caption("提示：点击右上角复制按钮，粘贴到网站后台的 HTML/源码模式下。")
         else:
             st.warning("请先输入内容")
+
 
 
 
