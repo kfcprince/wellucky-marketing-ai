@@ -1,6 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 import dashscope 
+from zhipuai import ZhipuAI
 from dashscope import MultiModalConversation, ImageSynthesis 
 from PIL import Image, ImageEnhance, ImageDraw, ImageFont
 import io
@@ -20,10 +21,12 @@ import uuid
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
     ALI_API_KEY = st.secrets["ALI_API_KEY"]
+    ZHIPU_API_KEY = st.secrets["ZHIPU_API_KEY"]
 except:
     # 如果本地运行没有配置 secrets，则留空提醒
     GOOGLE_API_KEY = ""
     ALI_API_KEY = ""
+    ZHIPU_API_KEY = ""
 
 # Buffer 配置也可以存入 Secrets，或者保持现状（因为不涉及敏感扣费）
 BUFFER_LOGISTICS_URL = "https://publish.buffer.com/profile/你的物流ID"
@@ -170,6 +173,15 @@ def get_prompt(info, platform, user_draft, link, task_type):
         """
 
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
+    def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
+    if engine == "zhipu":
+        client = ZhipuAI(api_key=api_key)
+        # 如果需要识图，智谱用 glm-4v 模型；如果只是写文案，用普通 glm-4
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return clean_text(response.choices[0].message.content)
     if engine == "google":
         genai.configure(api_key=api_key)
         m = genai.GenerativeModel(model)
@@ -205,7 +217,11 @@ if 'edited_cover' not in st.session_state: st.session_state.edited_cover = None
 
 with st.sidebar:
     st.header("1. 配置")
-    engine_choice = st.radio("文案引擎", ("Google Gemini (需梯子)", "阿里通义 (直连)"), key="eng_radio")
+    engine_choice = st.radio("文案引擎", ("Google Gemini", "阿里通义", "智谱清言 (GLM)"))
+    if "智谱" in engine_choice:
+        eng_type = "zhipu"
+        mod_list = ["glm-4-plus", "glm-4-flash"] # Flash 速度快，Plus 质量高
+        cur_key = ZHIPU_API_KEY
     
     if "Google" in engine_choice:
         eng_type = "google"
@@ -367,4 +383,5 @@ with tab2:
             # 下载按钮
             buf = io.BytesIO()
             preview_img.save(buf, format="PNG")
+
             st.download_button("⬇️ 下载这张封面", buf.getvalue(), "cover.png", "image/png", type="primary", use_container_width=True)
