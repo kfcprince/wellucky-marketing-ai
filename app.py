@@ -239,27 +239,38 @@ if 'edited_cover' not in st.session_state: st.session_state.edited_cover = None
 
 with st.sidebar:
     st.header("1. 配置")
-    engine_choice = st.radio("文案引擎", ("Google Gemini", "阿里通义", "智谱清言 (GLM)"))
-    if "智谱" in engine_choice:
+    
+    # 引擎选择
+    engine_choice = st.radio(
+        "文案引擎", 
+        ("Google Gemini", "阿里通义", "智谱清言 (GLM)"), 
+        key="eng_radio"
+    )
+    
+    # 根据选择动态切换模型列表和 Key
+    if engine_choice == "Google Gemini":
+        eng_type = "google"
+        mod_list = ["gemini-1.5-flash", "gemini-1.5-pro"]
+        cur_key = GOOGLE_API_KEY
+    elif engine_choice == "阿里通义":
+        eng_type = "ali"
+        mod_list = ["qwen-vl-max", "qwen-vl-plus"]
+        cur_key = ALI_API_KEY
+    else: # 智谱清言
         eng_type = "zhipu"
-        mod_list = ["glm-4-plus", "glm-4-flash"] # Flash 速度快，Plus 质量高
+        # glm-4v 是智谱最强的识图模型，glm-4-flash 是速度最快的
+        mod_list = ["glm-4v", "glm-4-plus", "glm-4-flash"] 
         cur_key = ZHIPU_API_KEY
     
-    if "Google" in engine_choice:
-        eng_type = "google"
-        mod_list = ["gemini-2.5-flash", "gemini-3-flash-preview"]
-        cur_key = GOOGLE_API_KEY
-    else:
-        eng_type = "ali"
-        mod_list = ["qwen-vl-max"]
-        cur_key = ALI_API_KEY
-    
+    # 模型选择框会根据上面的 mod_list 实时变化
     sel_mod = st.selectbox("选择模型", mod_list, key="mod_select")
+    
     st.divider()
     st.header("2. 业务")
     biz_sel = st.radio("模式", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), key="biz_radio")
     cur_biz = "logistics" if "VastLog" in biz_sel else "house"
     cur_info = BIZ_CONFIG[cur_biz]
+    
     st.divider()
     platform = st.selectbox("发布平台", ["Facebook", "LinkedIn", "YouTube", "TikTok"], key="plat_select")
 
@@ -407,5 +418,6 @@ with tab2:
             preview_img.save(buf, format="PNG")
 
             st.download_button("⬇️ 下载这张封面", buf.getvalue(), "cover.png", "image/png", type="primary", use_container_width=True)
+
 
 
