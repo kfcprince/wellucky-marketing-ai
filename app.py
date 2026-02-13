@@ -1,7 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
 import dashscope 
-from dashscope import ImageSynthesis, MultiModalConversation
+from dashscope import ImageSynthesis, MultiModalConversation, Generation
 from zhipuai import ZhipuAI
 from PIL import Image, ImageDraw, ImageFont
 import io, base64, re, os, requests, uuid, json
@@ -9,7 +9,7 @@ import io, base64, re, os, requests, uuid, json
 # ==========================================
 # 0. 全局配置
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.0", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.1", layout="wide", page_icon="🦁")
 
 # 初始化 session_state
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
@@ -111,8 +111,10 @@ def run_ai_text(engine, prompt, key, model_name):
         
         elif engine == "智谱清言":
             client = ZhipuAI(api_key=key)
+            # 智谱纯文本用 glm-4-plus 或 glm-4
+            text_model = "glm-4-plus" if "plus" in model_name else "glm-4"
             response = client.chat.completions.create(
-                model=model_name,
+                model=text_model,
                 messages=[{"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content
@@ -120,10 +122,9 @@ def run_ai_text(engine, prompt, key, model_name):
         elif engine == "阿里通义":
             dashscope.api_key = key
             messages = [{"role": "user", "content": prompt}]
-            # 使用qwen-max或qwen-plus进行纯文本对话
-            from dashscope import Generation
+            # 阿里纯文本用qwen-max
             response = Generation.call(
-                model='qwen-max',  # 纯文本用qwen-max
+                model='qwen-max',
                 messages=messages
             )
             return response.output.text
@@ -148,8 +149,10 @@ def run_ai_vision(engine, img, prompt, key, model_name):
         elif engine == "智谱清言":
             client = ZhipuAI(api_key=key)
             img_base64 = f"data:image/png;base64,{pil_to_base64(img)}"
+            # 智谱图片识别必须用 glm-4v 或你的 glm-4-6v
+            vision_model = model_name if "v" in model_name.lower() else "glm-4v"
             response = client.chat.completions.create(
-                model="glm-4v",  # 智谱必须用glm-4v处理图片
+                model=vision_model,
                 messages=[{
                     "role": "user", 
                     "content": [
@@ -174,7 +177,7 @@ def run_ai_vision(engine, img, prompt, key, model_name):
                     ]
                 }]
                 response = MultiModalConversation.call(
-                    model=model_name,
+                    model=model_name,  # qwen-vl-max 或 qwen-vl-plus
                     messages=messages
                 )
                 
@@ -261,7 +264,7 @@ def analyze_seo_score(html_content):
 # 2. 侧边栏配置
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 系统配置 V29.0")
+    st.title("⚙️ 系统配置 V29.1")
     
     # 业务选择
     st.markdown("### 🏢 业务模式")
@@ -281,21 +284,40 @@ with st.sidebar:
     st.markdown("### 🧠 AI 引擎配置")
     engine_choice = st.radio("选择AI厂商", ("Google Gemini", "智谱清言", "阿里通义"))
     
-    # 根据引擎显示不同模型
+    # 根据引擎显示不同模型（修正后的模型列表）
     if engine_choice == "Google Gemini":
-        model_options = ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
+        model_options = [
+            "gemini-2.0-flash-exp",
+            "gemini-2.0-flash-lite", 
+            "gemini-1.5-pro-002",
+            "gemini-1.5-flash-002",
+            "gemini-1.5-flash-8b"
+        ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = GOOGLE_API_KEY
         api_status = "✅ 已配置" if GOOGLE_API_KEY else "❌ 未配置"
     
     elif engine_choice == "智谱清言":
-        model_options = ["glm-4-plus", "glm-4", "glm-4v"]
+        model_options = [
+            "glm-4-6v",      # 你实际使用的模型
+            "glm-4v",        # 图片识别
+            "glm-4-plus",    # 纯文本
+            "glm-4"          # 标准版
+        ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = ZHIPU_API_KEY
         api_status = "✅ 已配置" if ZHIPU_API_KEY else "❌ 未配置"
+        
+        # 提示：图片识别需要v系列模型
+        if "v" not in sel_model.lower():
+            st.caption("⚠️ 图片识别需选择带'v'的模型")
     
     else:  # 阿里通义
-        model_options = ["qwen-vl-max", "qwen-vl-plus", "qwen-max"]
+        model_options = [
+            "qwen-vl-max",    # 图片识别
+            "qwen-vl-plus",   # 图片识别
+            "qwen-max"        # 纯文本
+        ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = ALI_API_KEY
         api_status = "✅ 已配置" if ALI_API_KEY else "❌ 未配置"
@@ -924,6 +946,7 @@ Output only the alt text, no explanations.
                 
                 except Exception as e:
                     st.error(f"❌ 生成失败: {str(e)}")
+                    st.exception(e)  # 显示详细错误信息
     
     # 显示结果
     if st.session_state.seo_metadata:
@@ -1044,4 +1067,4 @@ Excerpt:
 # 底部信息
 # ==========================================
 st.divider()
-st.caption(f"🦁 {cinfo['name']} 运营中台 V29.0 | Powered by {engine_choice} ({sel_model})")
+st.caption(f"🦁 {cinfo['name']} 运营中台 V29.1 | Powered by {engine_choice} ({sel_model})")
