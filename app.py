@@ -453,11 +453,12 @@ with st.sidebar:
     
     if engine_choice == "Google Gemini":
         model_options = [
-            "gemini-2.0-flash-exp",
-            "gemini-2.0-flash-lite", 
-            "gemini-1.5-pro-002",
-            "gemini-1.5-flash-002",
-            "gemini-1.5-flash-8b"
+            "gemini-2-flash-latest",
+        "gemini-2-0-flash",
+        "gemini-2-5-flash-preview",
+        "gemini-2-5-pro",
+        "gemini-3-pro-preview",
+        "gemini-2-0-flash-lite"
         ]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = GOOGLE_API_KEY
@@ -1195,5 +1196,6 @@ Excerpt:
 
 st.divider()
 st.caption(f"🦁 {cinfo['name']} 运营中台 V29.2 | Powered by {engine_choice} ({sel_model})")
+
 
 
