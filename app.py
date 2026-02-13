@@ -118,13 +118,39 @@ def generate_ai_cover(prompt, ratio, api_key):
     except: return None
 
 def get_prompt(info, platform, user_draft, link, task_type):
+    """
+    AI 提示词中心
+    根据不同任务（文案、SEO文件名、GEO深度优化）生成对应的指令
+    """
     contact = f"Web: {info['website']}, WhatsApp: {info['phone']}"
+    
+    # 任务 A: 社交媒体文案
     if task_type == "content":
-        return f"Role: Social Media Manager for {info['full_name']}. Draft: {user_draft}. Link: {link}. Contact: {contact}."
+        return f"Role: Social Media Manager for {info['full_name']}. Platform: {platform}. Draft: {user_draft}. Link: {link}. Contact: {contact}. Rules: Professional, Max 2 emojis, NO markdown."
+    
+    # 任务 B: 深度 SEO/GEO 专家 (新增 HTML 强制排版逻辑)
     elif task_type == "geo":
-        return f"Role: Senior SEO & GEO Specialist. Task: Translate/Refine to authoritative English. Enhance EEAT. Provide Article and JSON-LD FAQ Schema. Content: {user_draft}"
+        return f"""
+        Role: Senior Digital Marketing & HTML Specialist.
+        Business Focus: {info['full_name']} ({info['context']})
+        Task: Translate or Refine the content into authoritative, professional English.
+
+        Strict Requirements:
+        1. **EEAT & SEO**: Use industry-specific terms to enhance Expertise and Trustworthiness.
+        2. **HTML Layout**: Output the content in ONE single <div> block with:
+           - Container: max-width 900px, font-family Arial, line-height 1.6.
+           - Headings: Use <h2> with a blue left border (5px solid #0056b3) and 15px padding-left.
+           - Images: If images are described, leave a placeholder <img src='IMAGE_URL' style='width:100%; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.1); margin-bottom:15px;'>.
+           - Structure: Use <p> for paragraphs and <ul>/<li> for features/benefits.
+        3. **Schema**: At the very end, provide a JSON-LD FAQ Schema code block separately.
+
+        Content to process:
+        {user_draft}
+        """
+    
+    # 任务 C: SEO 图片文件名
     else:
-        return f"Task: Google SEO filename for {info['keywords']}. Include '{info['name'].lower()}'."
+        return f"Task: Google SEO filename for {info['keywords']}. Include brand '{info['name'].lower()}' and use hyphens."
 
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
     if engine == "zhipu":
@@ -254,25 +280,32 @@ with tab2:
 
 # --- Tab 3: SEO/GEO 深度优化 ---
 with tab3:
-    st.subheader("🌍 内容深度加工 (中译英 + EEAT + Schema)")
-    col_text, col_img = st.columns([2, 1])
+    st.subheader("🌍 内容深度加工 (中译英 + EEAT + HTML 排版)")
     
-    with col_text:
-        raw_text = st.text_area("粘贴你的中文草稿或原始英文", height=300)
-    
-    with col_img:
-        # 新增：允许在 SEO 专家这里也上传图片
-        geo_image = st.file_uploader("📂 上传相关实拍图 (AI 会提取图片细节进入文案)", type=['jpg','png','webp'], key="geo_img")
-        if geo_image:
-            st.image(geo_image, caption="已加载图片证据", use_container_width=True)
+    col_input, col_img_upload = st.columns([2, 1])
+    with col_input:
+        raw_text = st.text_area("粘贴你的中文发货实录或英文草稿", height=250, key="geo_input")
+    with col_img_upload:
+        geo_image = st.file_uploader("上传对应图片 (AI会根据图片细节优化文案)", type=['jpg','png','webp'], key="geo_img")
 
-    if st.button("✨ 执行深度优化", type="primary"):
+    if st.button("✨ 执行深度优化并生成 HTML", type="primary"):
         if raw_text:
-            # 修改逻辑：如果上传了图片，让 AI 同时处理图片和文字
             geo_prompt = get_prompt(cur_info, "", raw_text, "", "geo")
-            with st.spinner("正在分析图片并润色文案..."):
-                # 调用时传入 geo_image
-                refined_content = run_text_engine(eng_type, geo_image, geo_prompt, cur_key, sel_mod)
-                st.markdown("### 💎 优化后的权威文案")
-                st.write(refined_content)
-
+            with st.spinner("专家正在排版中..."):
+                # 执行 AI 生成
+                refined_output = run_text_engine(eng_type, geo_image, geo_prompt, cur_key, sel_mod)
+                
+                st.markdown("---")
+                col_preview, col_source = st.columns(2)
+                
+                with col_preview:
+                    st.markdown("### 👁️ 效果预览 (Preview)")
+                    # 在网页中直接渲染 HTML
+                    st.components.v1.html(refined_output, height=600, scrolling=True)
+                
+                with col_source:
+                    st.markdown("### 💻 HTML 源代码")
+                    st.code(refined_output, language="html")
+                    st.caption("提示：点击右上角复制按钮，粘贴到网站后台的 HTML/源码模式下。")
+        else:
+            st.warning("请先输入内容")
