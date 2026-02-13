@@ -1,6 +1,6 @@
-streamlit>=1.28.0
-google-generativeai>=0.3.0
-zhipuai>=2.0.0
-dashscope>=1.14.0
-Pillow>=10.0.0
-requests>=2.31.0
+streamlit==1.30.0
+google-generativeai==0.3.2
+zhipuai==2.0.1
+dashscope==1.17.0
+Pillow==10.2.0
+requests==2.31.0
