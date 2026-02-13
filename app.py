@@ -173,7 +173,6 @@ def get_prompt(info, platform, user_draft, link, task_type):
         """
 
 def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
-    def run_text_engine(engine, image_obj_or_path, prompt, api_key, model):
     if engine == "zhipu":
         client = ZhipuAI(api_key=api_key)
         # 如果需要识图，智谱用 glm-4v 模型；如果只是写文案，用普通 glm-4
@@ -385,3 +384,4 @@ with tab2:
             preview_img.save(buf, format="PNG")
 
             st.download_button("⬇️ 下载这张封面", buf.getvalue(), "cover.png", "image/png", type="primary", use_container_width=True)
+
