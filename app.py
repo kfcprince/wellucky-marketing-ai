@@ -265,61 +265,81 @@ with tab2:
 # --- Tab 3: GEO/AIO 专家 (高保真 + Wellucky 专属) ---
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
-    st.markdown(f"##### 🛡️ CMS 安全镜像版 (当前对象: **{cinfo['name']}**)")
+    st.markdown(f"##### 🛡️ 高保真·美学发布套件 (当前对象: **{cinfo['name']}**)")
     
-    # 输入区
     cc1, cc2 = st.columns([1, 1])
     with cc1: 
-        cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
+        cn_txt = st.text_area("中文原文 / 技术参数", height=300, placeholder="粘贴内容...")
         target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成安全内容 (代码分离)", type="primary", use_container_width=True):
+    if st.button("✨ 生成美化版内容 (精准翻译)", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # Wellucky 专属 CTA
+            # Wellucky 专属 CTA (硬编码，保持黑色高级感)
             wellucky_cta_html = """
-<div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
-    <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">Why Choose Wellucky?</h3>
-    <p style="color: #aaa; margin-bottom: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
-        We are a <strong>professional manufacturer since 2005</strong> with a proven track record in engineering and exporting high-quality prefab modular structures. We offer comprehensive <strong>OEM/ODM services</strong>—from design consultation to final delivery—ensuring your specific project needs are met.
+<div style="margin: 60px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 12px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
+    <h3 style="font-size: 26px; margin-bottom: 15px; color: #fff; letter-spacing: 1px;">Why Choose Wellucky?</h3>
+    <p style="color: #ccc; margin-bottom: 30px; max-width: 800px; margin-left: auto; margin-right: auto; line-height: 1.6;">
+        We are a <strong>professional manufacturer since 2005</strong> with a proven track record in engineering and exporting high-quality prefab modular structures. We offer comprehensive <strong>OEM/ODM services</strong>—from design consultation to final delivery.
     </p>
-    <p style="color: #fff; font-weight: bold; margin-bottom: 30px;">Invest in Efficiency, Quality, and Innovation. Let’s Build Your Vision Together.</p>
     <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px;">
-        <a href="https://www.welluckyhouse.com/contact" target="_blank" rel="noopener noreferrer" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 15px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">INQUIRY FOR QUOTE</a>
-        <a href="mailto:info@welluckyhouse.com" style="border: 2px solid #fff; color: #fff; text-decoration: none; padding: 13px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">EMAIL US DIRECTLY</a>
+        <a href="https://www.welluckyhouse.com/contact" target="_blank" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 12px 35px; border-radius: 6px; font-weight: 600; letter-spacing: 0.5px;">GET A QUOTE</a>
+        <a href="mailto:info@welluckyhouse.com" style="border: 1px solid #fff; color: #fff; text-decoration: none; padding: 12px 35px; border-radius: 6px; font-weight: 600; letter-spacing: 0.5px;">EMAIL US</a>
     </div>
-    <p style="margin-top: 25px; color: #4cd137; font-weight: bold;">Contact us for your tailored prefab solution</p>
 </div>
             """
 
-            # 提示词
+            # ====================================================
+            # V34.0 核心提示词：精准翻译 + 内置 CSS 美化
+            # ====================================================
             sys_p = f"""
-            Role: SEO Specialist for {cinfo['name']}. 
-            Task: Generate content for CMS backend.
+            Role: Senior Technical Translator & Content Designer for {cinfo['name']}.
+            Task: Translate Chinese to English & Format for CMS.
             Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
             
-            CRITICAL INSTRUCTIONS:
-            1. Translate & Optimize Content (EEAT).
-            2. Strictly follow the output format using separators.
-            3. **Alt Text Rule**: Must include target keyword.
-            4. **HTML Body**: Include H2/H3, Table, Images. 
-               - H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
-            5. **Schema**: JSON-LD for {cinfo['type']}.
+            [RULE 1: TRANSLATION STYLE - STRICT]
+            - **NO Exaggeration**: Do not use words like "breathtaking", "unparalleled", "state-of-the-art" unless they are in the source.
+            - **Tone**: Technical, Objective, Industrial, Direct.
+            - **Goal**: Be clear and concise (B2B style), not "salesy".
             
-            OUTPUT FORMAT:
+            [RULE 2: VISUAL FORMATTING (CSS Styling)]
+            You must apply inline CSS to make the content look beautiful:
+            
+            1. **Key Takeaways Box** (Start of article):
+               - Wrap in <div style="background-color:#f8f9fa; border-left: 5px solid {cinfo['color']}; padding: 20px; margin-bottom: 30px; border-radius: 4px;">
+               - Title: <strong>Key Takeaways</strong>
+            
+            2. **Headings**:
+               - Add Emojis relevant to the topic (e.g., 🛠️, 📐, 📦).
+               - Style: <h2 style="color:#2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 40px;">
+            
+            3. **Data Tables** (CRITICAL for AIO):
+               - If there are specs/parameters, convert to HTML Table.
+               - Style: <table style="width:100%; border-collapse: collapse; margin: 20px 0; font-size: 15px;">
+               - Th: <th style="background-color:{cinfo['color']}; color:white; padding: 12px; text-align: left;">
+               - Td: <td style="border-bottom: 1px solid #ddd; padding: 12px;">
+            
+            4. **Lists**:
+               - Use <ul> with style="line-height: 1.8; color: #444;"
+            
+            [RULE 3: SEO STRUCTURE]
+            - Alt Text: "{target_kw} - [Specific Detail]"
+            - Schema: JSON-LD for {cinfo['type']}.
+            
+            OUTPUT FORMAT (Separated):
             |||TITLE|||...
             |||SLUG|||...
             |||KEYWORDS|||...
             |||DESCRIPTION|||...
-            |||CONTENT|||...
+            |||CONTENT|||... (The HTML Body with inline CSS)
             |||SCHEMA|||...
             """
             
-            with st.spinner(f"正在构建 {cinfo['name']} 专属数据包..."):
+            with st.spinner(f"正在进行精准翻译与 UI 美化 ({sel_model})..."):
                 try:
-                    # AI 调用
+                    # AI 调用 (保持不变)
                     final_res = ""
                     if engine_choice == "Google Gemini":
                         cnt = [sys_p, f"Input Text:\n{cn_txt}"]
@@ -339,7 +359,7 @@ with tab3:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_res = resp.output.text
 
-                    # 解析
+                    # 解析结果
                     try:
                         p_title = final_res.split("|||TITLE|||")[1].split("|||")[0].strip()
                         p_slug = final_res.split("|||SLUG|||")[1].split("|||")[0].strip()
@@ -348,15 +368,11 @@ with tab3:
                         p_content = final_res.split("|||CONTENT|||")[1].split("|||")[0].strip()
                         p_schema = final_res.split("|||SCHEMA|||")[1].strip()
                         
-                        # 处理 HTML (Wellucky 拼接)
+                        # 拼接 Wellucky 专属板块
                         if cinfo['name'] == "Wellucky":
                             p_content += wellucky_cta_html
-                        
-                        # 【核心修正】不再自动拼接 Schema 到 p_content
-                        # p_content 保持纯净 HTML，确保前台不乱码
 
-                        # 渲染界面
-                        st.success("✅ 生成成功！注意：为了防止页面乱码，Schema 代码已分离。")
+                        st.success("✅ 美化版生成成功！已应用工业级 CSS 样式。")
                         
                         st.markdown("### 1. 基础字段")
                         c_t, c_s = st.columns([2, 1])
@@ -367,18 +383,18 @@ with tab3:
                         st.text_input("🔑 3. 关键字", value=p_kws)
                         st.text_area("📝 4 & 5. 描述 / 摘要", value=p_desc, height=100)
                         
-                        st.markdown("### 3. 内容编辑器 (安全版)")
-                        st.info("💡 请点击编辑器左上角的 [HTML] 按钮，粘贴下方代码（已移除会导致乱码的脚本）：")
-                        with st.expander("📄 6. 内容 (HTML + CTA)", expanded=True):
+                        st.markdown("### 3. 内容编辑器 (Visual Enhanced)")
+                        st.info("💡 下方代码已包含 CSS 样式（表格美化、卡片背景、Emoji标题）。请点击 [HTML] 按钮粘贴。")
+                        with st.expander("📄 6. 内容 (HTML + CSS + CTA)", expanded=True):
                             st.code(p_content, language="html")
-                        
-                        st.divider()
-                        
-                        st.markdown("### 4. 高级 SEO (可选)")
-                        st.warning("⚠️ 警告：仅当您确认后台有【自定义 Header/JS 代码】输入框时才粘贴此代码。如果贴入正文，前台会显示乱码！")
-                        with st.expander("🤖 7. Schema 结构化数据 (慎用)", expanded=False):
-                            full_schema_code = f'<script type="application/ld+json">\n{p_schema}\n</script>'
-                            st.code(full_schema_code, language="html")
+                            # 提供一个预览效果，让用户确信排版变美了
+                            st.divider()
+                            st.caption("👇 网页实际显示效果预览：")
+                            st.markdown(p_content, unsafe_allow_html=True)
+
+                        st.markdown("### 4. 高级")
+                        with st.expander("🤖 7. Schema (Separated)", expanded=False):
+                            st.code(f'<script type="application/ld+json">\n{p_schema}\n</script>', language="html")
 
                     except Exception as parse_e:
                         st.error("解析格式略有偏差，请手动复制：")
