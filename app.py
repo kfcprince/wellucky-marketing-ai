@@ -9,7 +9,7 @@ import io, base64, re, os, requests, uuid, zipfile
 # ==========================================
 # 0. 全局配置 & 初始化
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V30.0 (GEO版)", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V32.1", layout="wide", page_icon="🦁")
 
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
@@ -22,6 +22,7 @@ GOOGLE_API_KEY = get_secret_safe("GOOGLE_API_KEY")
 ALI_API_KEY = get_secret_safe("ALI_API_KEY")
 ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
 
+# 业务配置 (已包含 Action CTA)
 BIZ_CONFIG = {
     "logistics": {
         "name": "VastLog", 
@@ -33,7 +34,6 @@ BIZ_CONFIG = {
     },
     "house": {
         "name": "Wellucky", 
-        # 这里我根据您提供的HTML代码，更新了域名，确保一致性
         "website": "www.welluckyhouse.com", 
         "color": "#0066CC", 
         "type": "Product", 
@@ -110,7 +110,7 @@ def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2
 # 3. 侧边栏配置
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 配置 V30.0")
+    st.title("⚙️ 配置 V32.1")
     
     st.subheader("1. 业务模式")
     biz_choice = st.radio("Business", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), label_visibility="collapsed")
@@ -139,11 +139,11 @@ with st.sidebar:
 # 4. 主界面
 # ==========================================
 st.title(f"🦁 {cinfo['name']} 数字化运营台")
-st.caption(f"Current Model: {sel_model} | Mode: GEO/AIO Optimized")
+st.caption(f"Current Model: {sel_model}")
 tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GEO/AIO 专家"])
 
 # --- Tab 1: 智能文案 ---
-1:
+with tab1:
     c1, c2 = st.columns([1, 1])
     files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1")
     with c2:
@@ -219,7 +219,7 @@ tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GE
                 st.download_button("⬇️ 单图下载", res['data'], res['name'], key=f"d_{ukey}")
 
 # --- Tab 2: 封面工厂 ---
-2:
+with tab2:
     bg_col, txt_col = st.columns([1, 1])
     with bg_col:
         st.markdown("#### A. 背景")
@@ -262,28 +262,22 @@ tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GE
         st.image(final, use_container_width=True)
         buf=io.BytesIO(); final.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
 
-# --- Tab 3: GEO/AIO 专家 (核心升级) ---
-# ==========================================
-# V31.3 Tab 3 代码：增强 Alt Text 逻辑
-# ==========================================
-# ==========================================
-# V32.0 Tab 3 代码：高保真翻译 (High Fidelity)
-# ==========================================
+# --- Tab 3: GEO/AIO 专家 (高保真 + Wellucky 专属) ---
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
     st.markdown(f"##### 🛡️ 高保真发布套件 (当前对象: **{cinfo['name']}**)")
     
     cc1, cc2 = st.columns([1, 1])
     with cc1: 
-        cn_txt = st.text_area("中文原文 (产品参数/服务条款)", height=300, placeholder="粘贴内容...")
-        target_kw = st.text_input("🎯 目标关键词 (用于 Meta/Alt)", placeholder="例如: Luxury Prefab House")
+        cn_txt = st.text_area("中文原文 / 产品参数", height=300, placeholder="粘贴内容...")
+        target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
     if st.button("✨ 生成高保真英文代码", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # Wellucky 专属 CTA (硬编码，绝对不会变)
+            # Wellucky 专属板块 (硬编码)
             wellucky_cta_html = """
 <div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
     <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">Why Choose Wellucky?</h3>
@@ -299,37 +293,34 @@ with tab3:
 </div>
             """
 
-            # ====================================================
-            # V32.0 提示词：强制保真，禁止胡编乱造
-            # ====================================================
+            # 提示词：强制保真
             sys_p = f"""
-            Role: Professional Technical Translator & SEO Specialist for {cinfo['name']} ({cinfo['website']}). 
+            Role: Professional Technical Translator for {cinfo['name']} ({cinfo['website']}). 
             
             MISSION: 
             Translate the user's Chinese text to English.
             
-            CRITICAL RULES (Do NOT violate):
-            1. **STRICT FIDELITY**: You must translate the content accurately. Do NOT summarize, Do NOT delete details, and Do NOT add marketing fluff that isn't in the source.
-            2. **TONE**: Professional, Industrial, Objective. Avoid emotional adjectives.
+            CRITICAL RULES:
+            1. **STRICT FIDELITY**: Translate accurately. Do NOT summarize. Do NOT delete details. Do NOT add marketing fluff.
+            2. **TONE**: Professional, Industrial.
             3. **FORMATTING**:
-               - Organize the translated text into HTML structure.
-               - If the input contains specs/parameters, force them into an HTML <table>.
+               - Organize text into HTML.
+               - If input has specs, make an HTML <table>.
                - Use <h2> tags styled: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
-               - Use <p> tags for text.
             4. **IMAGES**:
                - Insert <img src="filename" alt="[Description] {target_kw}" style="width:100%; border-radius:8px; margin:20px 0;">.
-               - Alt Text must be descriptive and include the target keyword.
-            5. **META & SCHEMA** (Create these based on the content):
+               - Alt text MUST describe image content AND include target keyword.
+            5. **META & SCHEMA**:
                - Generate Meta Title/Description.
                - Generate JSON-LD Schema (`{cinfo['type']}`).
             
             OUTPUT SECTIONS:
             [SECTION 1: METADATA] (Slug, Title, Desc)
-            [SECTION 2: HTML CONTENT] (The translated body code)
-            [SECTION 3: SCHEMA] (The JSON-LD code)
+            [SECTION 2: HTML CONTENT] (Body)
+            [SECTION 3: SCHEMA] (JSON-LD)
             """
             
-            with st.spinner(f"正在进行高保真翻译与 SEO 封装 ({sel_model})..."):
+            with st.spinner(f"正在进行高保真翻译 ({sel_model})..."):
                 try:
                     final_res = ""
                     if engine_choice == "Google Gemini":
@@ -350,7 +341,7 @@ with tab3:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_res = resp.output.text
 
-                    st.success("✅ 翻译完成！内容已精准对应原文。")
+                    st.success("✅ 翻译完成！")
                     
                     with st.expander("📝 1. SEO 元数据 (Meta)", expanded=True):
                         try: st.code(final_res.split("[SECTION 2")[0], language="yaml")
@@ -358,11 +349,10 @@ with tab3:
                     
                     with st.expander("📄 2. 网页正文 (HTML)", expanded=True):
                         try:
-                            # 提取 HTML 并拼接硬编码模块
                             html_part = final_res.split("[SECTION 2: HTML CONTENT]")[1].split("[SECTION 3")[0]
+                            # Wellucky 专属拼接
                             if cinfo['name'] == "Wellucky":
                                 html_part += wellucky_cta_html
-                            
                             st.markdown(html_part, unsafe_allow_html=True)
                             st.code(html_part, language="html")
                         except: st.code(final_res, language="html")
