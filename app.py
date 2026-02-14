@@ -23,8 +23,23 @@ ALI_API_KEY = get_secret_safe("ALI_API_KEY")
 ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
 
 BIZ_CONFIG = {
-    "logistics": {"name": "VastLog", "website": "www.vastlog.com", "color": "#FF9900", "type": "LogisticsService", "keywords": ["logistics", "shipping", "freight", "cargo", "DDP"]},
-    "house": {"name": "Wellucky", "website": "www.wellucky.com", "color": "#0066CC", "type": "Product", "keywords": ["container house", "modular home", "prefab", "steel structure"]}
+    "logistics": {
+        "name": "VastLog", 
+        "website": "www.vastlog.com", 
+        "color": "#FF9900", 
+        "type": "LogisticsService", 
+        "keywords": ["logistics", "shipping", "freight", "cargo", "DDP"],
+        "action": "Get a Free Shipping Quote"
+    },
+    "house": {
+        "name": "Wellucky", 
+        # 这里我根据您提供的HTML代码，更新了域名，确保一致性
+        "website": "www.welluckyhouse.com", 
+        "color": "#0066CC", 
+        "type": "Product", 
+        "keywords": ["container house", "modular home", "prefab", "steel structure"],
+        "action": "Customize Your Container Home"
+    }
 }
 
 # ==========================================
@@ -250,74 +265,111 @@ with tab2:
 # --- Tab 3: GEO/AIO 专家 (核心升级) ---
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
-    st.markdown("##### 🛡️ GEO (Generative Engine Optimization) + AIO 核心引擎")
+    st.markdown(f"##### 🛡️ GEO/AIO 发布套件 (当前对象: **{cinfo['name']}**)")
     
     cc1, cc2 = st.columns([1, 1])
-    with cc1: cn_txt = st.text_area("中文原文", height=300, placeholder="粘贴内容...")
-    with cc2: imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
+    with cc1: 
+        cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
+        target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
+    with cc2: 
+        imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成 GEO/AIO 代码", type="primary", use_container_width=True):
+    if st.button("✨ 生成全套发布包 (含专属CTA)", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
             # ====================================================
-            # V30.0 GEO/AIO 核心提示词
+            # Wellucky 专属 CTA 代码块 (硬编码，保持原样)
             # ====================================================
+            wellucky_cta_html = """
+<div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
+    <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">
+        Why Choose Wellucky?
+    </h3>
+    <p style="color: #aaa; margin-bottom: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
+        We are a <strong>professional manufacturer since 2005</strong> with a proven track record in engineering and exporting high-quality prefab modular structures. We offer comprehensive <strong>OEM/ODM services</strong>—from design consultation to final delivery—ensuring your specific project needs are met.
+    </p>
+    <p style="color: #fff; font-weight: bold; margin-bottom: 30px;">
+        Invest in Efficiency, Quality, and Innovation. Let’s Build Your Vision Together.
+    </p>
+    <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px;">
+        <a href="https://www.welluckyhouse.com/contact" target="_blank" rel="noopener noreferrer" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 15px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">INQUIRY FOR QUOTE</a>
+        <a href="mailto:info@welluckyhouse.com" style="border: 2px solid #fff; color: #fff; text-decoration: none; padding: 13px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">EMAIL US DIRECTLY</a>
+    </div>
+    <p style="margin-top: 25px; color: #4cd137; font-weight: bold;">
+        Contact us for your tailored prefab solution
+    </p>
+</div>
+            """
+
             sys_p = f"""
-            Role: Advanced GEO (Generative Engine Optimization) Specialist for {cinfo['name']} ({cinfo['website']}).
+            Role: Head of SEO for {cinfo['name']} ({cinfo['website']}). 
+            Task: Prepare a COMPLETE Publishing Package.
+            Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
             
-            Mission:
-            1. TRANSLATE Chinese to English (Native, Professional, Authority Tone).
-            2. OPTIMIZE FOR AI SEARCH (GEO/AIO):
-               - **Structure**: Use clear Heading Hierarchy (H2, H3).
-               - **Direct Answers**: Provide concise answers immediately after headings (for Featured Snippets).
-               - **Data formatting**: Convert ALL specifications/parameters into HTML <Table> (LLMs love tables).
-               - **Key Takeaways**: Start the article with a bullet-point summary box.
+            [SECTION 1: METADATA]
+            - URL Slug: create-seo-slug (lowercase, hyphens)
+            - Meta Title: Catchy Title (Max 60 chars) | {cinfo['name']}
+            - Meta Description: High CTR summary (Max 160 chars).
             
-            3. CONTENT ENHANCEMENT:
-               - Create an **FAQ Section** at the bottom (3-5 Q&A relevant to the content).
+            [SECTION 2: HTML CONTENT]
+            - Translate Chinese to English (EEAT Professional Tone).
+            - Structure:
+              1. **Key Takeaways** box.
+              2. **Specifications Table** (HTML Table).
+              3. Content with H2/H3. H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
+              4. **FAQ Section**: 3-5 Q&A.
+              5. **Images**: Insert <img src="filename" alt="SEO Alt Text">.
+              * NOTE: Do NOT add a contact section at the end, I will append a custom one programmatically.
             
-            4. TECHNICAL SEO (Schema):
-               - Add `application/ld+json` block.
-               - Include `{cinfo['type']}` Schema.
-               - CRITICAL: Include `FAQPage` Schema for the generated FAQ section.
-            
-            5. HTML STYLING:
-               - H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px; color:#333;"
-               - Table Style: style="width:100%; border-collapse: collapse; margin: 20px 0;" (Add simple borders).
-            
-            6. IMAGES:
-               - Insert <img src="filename" alt="Long Descriptive Alt Text for AI"> tags.
-            
-            Output ONLY valid HTML code.
+            [SECTION 3: SCHEMA]
+            - JSON-LD code for `{cinfo['type']}` AND `FAQPage`.
             """
             
-            with st.spinner("Executing GEO Strategy (Tables, FAQs, Schema)..."):
+            with st.spinner(f"正在为 {cinfo['name']} 生成并组装代码..."):
                 try:
-                    final_html = ""
+                    final_res = ""
                     if engine_choice == "Google Gemini":
                         cnt = [sys_p, f"Input:\n{cn_txt}"]
                         if imgs:
                             cnt.append("\nImages:")
                             for f in imgs: cnt.extend([f"\nFile: {f.name}", Image.open(f)])
                         genai.configure(api_key=api_key)
-                        final_html = genai.GenerativeModel(sel_model).generate_content(cnt).text
+                        final_res = genai.GenerativeModel(sel_model).generate_content(cnt).text
                     else:
                         img_note = f"\nImages: {', '.join([f.name for f in imgs])}" if imgs else ""
                         full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
                         if engine_choice == "智谱清言":
                             client = ZhipuAI(api_key=api_key)
-                            t_model = "glm-4-plus" 
-                            resp = client.chat.completions.create(model=t_model, messages=[{"role":"user","content":full_p}])
-                            final_html = resp.choices[0].message.content
+                            resp = client.chat.completions.create(model="glm-4-plus", messages=[{"role":"user","content":full_p}])
+                            final_res = resp.choices[0].message.content
                         else:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
-                            final_html = resp.output.text
+                            final_res = resp.output.text
 
-                    v, c = st.columns([1, 1])
-                    with v:
-                        st.markdown("### 👁️ GEO 预览 (含表格/FAQ)")
-                        st.markdown(final_html, unsafe_allow_html=True)
-                    with c:
-                        st.markdown("### 💻 AIO 代码 (含 FAQ Schema)")
-                        st.code(final_html, language="html")
+                    st.success(f"✅ 发布包构建完成！(已自动追加 {cinfo['name']} 专属 CTA)")
+                    
+                    with st.expander("📝 1. SEO 元数据 (Meta)", expanded=True):
+                        try: st.code(final_res.split("[SECTION 2")[0], language="yaml")
+                        except: st.code(final_res)
+                    
+                    with st.expander("📄 2. 网页正文 (HTML)", expanded=True):
+                        try:
+                            # 1. 提取 AI 生成的 HTML
+                            html_part = final_res.split("[SECTION 2: HTML CONTENT]")[1].split("[SECTION 3")[0]
+                            
+                            # 2. 【核心逻辑】如果是 Wellucky，自动追加您指定的代码
+                            if cinfo['name'] == "Wellucky":
+                                html_part += wellucky_cta_html
+                                st.caption("💡 已自动在文章底部追加 'Why Choose Wellucky' 黑色板块")
+                            
+                            st.markdown(html_part, unsafe_allow_html=True)
+                            st.code(html_part, language="html")
+                        except: 
+                            st.code(final_res, language="html")
+
+                    with st.expander("🤖 3. Schema 结构化数据"):
+                        try: st.code(final_res.split("[SECTION 3: SCHEMA]")[1], language="json")
+                        except: pass
+
                 except Exception as e: st.error(f"Error: {str(e)}")
+
