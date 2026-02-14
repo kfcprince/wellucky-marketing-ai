@@ -271,44 +271,83 @@ with tab2:
 
 # --- Tab 3: GEO/SEO 专家 ---
 with tab3:
+    # 更新标题，明确告知包含的功能
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
+    st.markdown("##### 🛡️ 功能：中译英 + EEAT 润色 + Schema 结构化数据 + 自动插图")
+    
     cc1, cc2 = st.columns([1, 1])
-    with cc1: cn_txt = st.text_area("中文原文", height=200)
-    with cc2: imgs = st.file_uploader("配图 (自动插入)", accept_multiple_files=True, key="t3_imgs")
+    with cc1: 
+        cn_txt = st.text_area("中文原文 / 产品参数", height=300, placeholder="在此输入中文内容...")
+    with cc2: 
+        imgs = st.file_uploader("文章配图 (AI会自动插入HTML)", accept_multiple_files=True, key="t3_imgs")
+        if imgs: st.info(f"已加载 {len(imgs)} 张图片，将根据上下文自动插入文章。")
 
-    if st.button("✨ 生成 GEO 代码", type="primary"):
-        if not cn_txt: st.warning("请输入中文")
+    # 按钮文案也改得更直观
+    if st.button("✨ 生成全套 SEO 代码 (HTML + Schema)", type="primary", use_container_width=True):
+        if not cn_txt: 
+            st.warning("⚠️ 请先输入中文原文！")
         else:
+            # ====================================================
+            # 核心提示词 (Prompt) - 这里就是您关心的 EEAT 和 Schema 指令
+            # ====================================================
             sys_p = f"""
-            Role: SEO Expert for {cinfo['name']}. Task: Translate CHINESE to ENGLISH. Keep meaning.
-            Format: HTML Article. Use <h2> tags styled with border-left:5px solid {cinfo['color']}.
-            Schema: Add <script type="application/ld+json"> for {cinfo['type']}.
-            Images: Insert <img src="filename" alt="SEO alt"> tags.
+            Role: Senior Google SEO Expert for {cinfo['name']} ({cinfo['website']}).
+            
+            Mission:
+            1. TRANSLATE the user's Chinese text to English.
+            2. EEAT OPTIMIZATION: Ensure the tone is Professional, Authoritative, and Trustworthy. No 'Chinglish'.
+            3. FORMATTING: Output a complete HTML Article. 
+               - Use <h2> tags with this specific style: style="border-left:5px solid {cinfo['color']}; padding-left:10px; color:#333;"
+               - Use <p> tags for paragraphs.
+            4. SCHEMA.ORG (Crucial): 
+               - Append a valid <script type="application/ld+json"> block at the end.
+               - Schema Type: "{cinfo['type']}" (Product or Service).
+               - Brand Name: "{cinfo['name']}".
+            5. IMAGES: 
+               - I will provide filenames. Insert <img src="filename" alt="SEO Optimized Description" style="width:100%; border-radius:8px; margin:20px 0;"> tags naturally into the content where they fit best.
+            
+            Output ONLY the HTML code.
             """
             
-            with st.spinner("AI Generating..."):
+            with st.spinner("SEO 专家正在进行 EEAT 优化和 Schema 编写..."):
                 try:
                     final_html = ""
+                    
+                    # 1. Google Gemini (多模态处理)
                     if engine_choice == "Google Gemini":
-                        cnt = [sys_p, f"Input:\n{cn_txt}"]
+                        cnt = [sys_p, f"Input Text:\n{cn_txt}"]
                         if imgs:
-                            cnt.append("\nImages:")
-                            for f in imgs: cnt.extend([f"\nFile: {f.name}", Image.open(f)])
+                            cnt.append("\nAvailable Image Files to Insert:")
+                            for f in imgs: cnt.extend([f"\nFilename: {f.name}", Image.open(f)])
                         genai.configure(api_key=api_key)
                         final_html = genai.GenerativeModel(sel_model).generate_content(cnt).text
+
+                    # 2. 智谱/阿里 (文本处理)
                     else:
-                        img_note = f"\nImage files: {', '.join([f.name for f in imgs])}" if imgs else ""
-                        full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
+                        img_note = f"\nAvailable Image filenames: {', '.join([f.name for f in imgs])}" if imgs else ""
+                        full_p = sys_p + img_note + f"\n\nSource Text to Translate:\n{cn_txt}"
+                        
                         if engine_choice == "智谱清言":
                             client = ZhipuAI(api_key=api_key)
+                            # 智谱翻译建议用 glm-4-plus
                             t_model = "glm-4-plus" 
                             resp = client.chat.completions.create(model=t_model, messages=[{"role":"user","content":full_p}])
                             final_html = resp.choices[0].message.content
                         else:
+                            # 阿里翻译建议用 qwen-max
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_html = resp.output.text
 
+                    # 展示结果
+                    st.success("✅ SEO 代码生成完毕！包含 EEAT 优化与 JSON-LD Schema。")
                     v, c = st.columns([1, 1])
-                    v.markdown(final_html, unsafe_allow_html=True)
-                    c.code(final_html, language="html")
-                except Exception as e: st.error(f"Error: {str(e)}")
+                    with v:
+                        st.markdown("### 👁️ 网页预览")
+                        st.caption("注：图片在网站后台上传后才会显示，此处仅预览排版")
+                        st.markdown(final_html, unsafe_allow_html=True)
+                    with c:
+                        st.markdown("### 💻 HTML 源代码 (直接复制)")
+                        st.code(final_html, language="html")
+                        
+                except Exception as e: 
+                    st.error(f"生成出错: {str(e)}")
