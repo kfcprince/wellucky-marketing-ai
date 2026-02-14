@@ -143,7 +143,7 @@ st.caption(f"Current Model: {sel_model} | Mode: GEO/AIO Optimized")
 tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GEO/AIO 专家"])
 
 # --- Tab 1: 智能文案 ---
-with tab1:
+1:
     c1, c2 = st.columns([1, 1])
     files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1")
     with c2:
@@ -219,7 +219,7 @@ with tab1:
                 st.download_button("⬇️ 单图下载", res['data'], res['name'], key=f"d_{ukey}")
 
 # --- Tab 2: 封面工厂 ---
-with tab2:
+2:
     bg_col, txt_col = st.columns([1, 1])
     with bg_col:
         st.markdown("#### A. 背景")
@@ -263,6 +263,9 @@ with tab2:
         buf=io.BytesIO(); final.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
 
 # --- Tab 3: GEO/AIO 专家 (核心升级) ---
+# ==========================================
+# V31.3 Tab 3 代码：增强 Alt Text 逻辑
+# ==========================================
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
     st.markdown(f"##### 🛡️ GEO/AIO 发布套件 (当前对象: **{cinfo['name']}**)")
@@ -270,37 +273,32 @@ with tab3:
     cc1, cc2 = st.columns([1, 1])
     with cc1: 
         cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
-        target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
+        target_kw = st.text_input("🎯 目标关键词 (用于 Alt Text)", placeholder="例如: Luxury Prefab House")
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成全套发布包 (含专属CTA)", type="primary", use_container_width=True):
+    if st.button("✨ 生成全套发布包 (含智能 Alt Text)", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # ====================================================
-            # Wellucky 专属 CTA 代码块 (硬编码，保持原样)
-            # ====================================================
+            # Wellucky 专属 CTA (保持不变)
             wellucky_cta_html = """
 <div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
-    <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">
-        Why Choose Wellucky?
-    </h3>
+    <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">Why Choose Wellucky?</h3>
     <p style="color: #aaa; margin-bottom: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
         We are a <strong>professional manufacturer since 2005</strong> with a proven track record in engineering and exporting high-quality prefab modular structures. We offer comprehensive <strong>OEM/ODM services</strong>—from design consultation to final delivery—ensuring your specific project needs are met.
     </p>
-    <p style="color: #fff; font-weight: bold; margin-bottom: 30px;">
-        Invest in Efficiency, Quality, and Innovation. Let’s Build Your Vision Together.
-    </p>
+    <p style="color: #fff; font-weight: bold; margin-bottom: 30px;">Invest in Efficiency, Quality, and Innovation. Let’s Build Your Vision Together.</p>
     <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px;">
         <a href="https://www.welluckyhouse.com/contact" target="_blank" rel="noopener noreferrer" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 15px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">INQUIRY FOR QUOTE</a>
         <a href="mailto:info@welluckyhouse.com" style="border: 2px solid #fff; color: #fff; text-decoration: none; padding: 13px 40px; border-radius: 50px; font-weight: bold; font-size: 18px;">EMAIL US DIRECTLY</a>
     </div>
-    <p style="margin-top: 25px; color: #4cd137; font-weight: bold;">
-        Contact us for your tailored prefab solution
-    </p>
+    <p style="margin-top: 25px; color: #4cd137; font-weight: bold;">Contact us for your tailored prefab solution</p>
 </div>
             """
 
+            # ====================================================
+            # V31.3 核心升级：Alt Text 强制指令
+            # ====================================================
             sys_p = f"""
             Role: Head of SEO for {cinfo['name']} ({cinfo['website']}). 
             Task: Prepare a COMPLETE Publishing Package.
@@ -318,16 +316,18 @@ with tab3:
               2. **Specifications Table** (HTML Table).
               3. Content with H2/H3. H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
               4. **FAQ Section**: 3-5 Q&A.
-              5. **Images**: Insert <img src="filename" alt="SEO Alt Text">.
-              * NOTE: Do NOT add a contact section at the end, I will append a custom one programmatically.
+              5. **Images (CRITICAL)**: 
+                 - Insert <img src="filename" alt="[Specific visual description] + {target_kw}" style="width:100%; border-radius:8px; margin:20px 0;">.
+                 - **ALT TEXT RULE**: The alt text MUST describe the image content specifically (e.g., "Steel structure detail of prefab house") AND include the target keyword. Do NOT use generic text like "image".
             
             [SECTION 3: SCHEMA]
             - JSON-LD code for `{cinfo['type']}` AND `FAQPage`.
             """
             
-            with st.spinner(f"正在为 {cinfo['name']} 生成并组装代码..."):
+            with st.spinner(f"正在为 {cinfo['name']} 生成 SEO 代码 (优化 Alt 属性)..."):
                 try:
                     final_res = ""
+                    # Gemini (推荐)：因为它能看见图片，所以 Alt Text 写得最准
                     if engine_choice == "Google Gemini":
                         cnt = [sys_p, f"Input:\n{cn_txt}"]
                         if imgs:
@@ -336,6 +336,7 @@ with tab3:
                         genai.configure(api_key=api_key)
                         final_res = genai.GenerativeModel(sel_model).generate_content(cnt).text
                     else:
+                        # 智谱/阿里：根据文件名猜 Alt Text
                         img_note = f"\nImages: {', '.join([f.name for f in imgs])}" if imgs else ""
                         full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
                         if engine_choice == "智谱清言":
@@ -346,7 +347,7 @@ with tab3:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_res = resp.output.text
 
-                    st.success(f"✅ 发布包构建完成！(已自动追加 {cinfo['name']} 专属 CTA)")
+                    st.success(f"✅ 发布包构建完成！Alt Text 已包含关键词 '{target_kw}'")
                     
                     with st.expander("📝 1. SEO 元数据 (Meta)", expanded=True):
                         try: st.code(final_res.split("[SECTION 2")[0], language="yaml")
@@ -354,22 +355,15 @@ with tab3:
                     
                     with st.expander("📄 2. 网页正文 (HTML)", expanded=True):
                         try:
-                            # 1. 提取 AI 生成的 HTML
                             html_part = final_res.split("[SECTION 2: HTML CONTENT]")[1].split("[SECTION 3")[0]
-                            
-                            # 2. 【核心逻辑】如果是 Wellucky，自动追加您指定的代码
                             if cinfo['name'] == "Wellucky":
                                 html_part += wellucky_cta_html
-                                st.caption("💡 已自动在文章底部追加 'Why Choose Wellucky' 黑色板块")
-                            
                             st.markdown(html_part, unsafe_allow_html=True)
                             st.code(html_part, language="html")
-                        except: 
-                            st.code(final_res, language="html")
+                        except: st.code(final_res, language="html")
 
                     with st.expander("🤖 3. Schema 结构化数据"):
                         try: st.code(final_res.split("[SECTION 3: SCHEMA]")[1], language="json")
                         except: pass
 
                 except Exception as e: st.error(f"Error: {str(e)}")
-
