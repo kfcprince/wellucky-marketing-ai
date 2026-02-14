@@ -266,21 +266,24 @@ tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GE
 # ==========================================
 # V31.3 Tab 3 代码：增强 Alt Text 逻辑
 # ==========================================
+# ==========================================
+# V32.0 Tab 3 代码：高保真翻译 (High Fidelity)
+# ==========================================
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
-    st.markdown(f"##### 🛡️ GEO/AIO 发布套件 (当前对象: **{cinfo['name']}**)")
+    st.markdown(f"##### 🛡️ 高保真发布套件 (当前对象: **{cinfo['name']}**)")
     
     cc1, cc2 = st.columns([1, 1])
     with cc1: 
-        cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
-        target_kw = st.text_input("🎯 目标关键词 (用于 Alt Text)", placeholder="例如: Luxury Prefab House")
+        cn_txt = st.text_area("中文原文 (产品参数/服务条款)", height=300, placeholder="粘贴内容...")
+        target_kw = st.text_input("🎯 目标关键词 (用于 Meta/Alt)", placeholder="例如: Luxury Prefab House")
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成全套发布包 (含智能 Alt Text)", type="primary", use_container_width=True):
+    if st.button("✨ 生成高保真英文代码", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # Wellucky 专属 CTA (保持不变)
+            # Wellucky 专属 CTA (硬编码，绝对不会变)
             wellucky_cta_html = """
 <div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
     <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">Why Choose Wellucky?</h3>
@@ -297,46 +300,46 @@ with tab3:
             """
 
             # ====================================================
-            # V31.3 核心升级：Alt Text 强制指令
+            # V32.0 提示词：强制保真，禁止胡编乱造
             # ====================================================
             sys_p = f"""
-            Role: Head of SEO for {cinfo['name']} ({cinfo['website']}). 
-            Task: Prepare a COMPLETE Publishing Package.
-            Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
+            Role: Professional Technical Translator & SEO Specialist for {cinfo['name']} ({cinfo['website']}). 
             
-            [SECTION 1: METADATA]
-            - URL Slug: create-seo-slug (lowercase, hyphens)
-            - Meta Title: Catchy Title (Max 60 chars) | {cinfo['name']}
-            - Meta Description: High CTR summary (Max 160 chars).
+            MISSION: 
+            Translate the user's Chinese text to English.
             
-            [SECTION 2: HTML CONTENT]
-            - Translate Chinese to English (EEAT Professional Tone).
-            - Structure:
-              1. **Key Takeaways** box.
-              2. **Specifications Table** (HTML Table).
-              3. Content with H2/H3. H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
-              4. **FAQ Section**: 3-5 Q&A.
-              5. **Images (CRITICAL)**: 
-                 - Insert <img src="filename" alt="[Specific visual description] + {target_kw}" style="width:100%; border-radius:8px; margin:20px 0;">.
-                 - **ALT TEXT RULE**: The alt text MUST describe the image content specifically (e.g., "Steel structure detail of prefab house") AND include the target keyword. Do NOT use generic text like "image".
+            CRITICAL RULES (Do NOT violate):
+            1. **STRICT FIDELITY**: You must translate the content accurately. Do NOT summarize, Do NOT delete details, and Do NOT add marketing fluff that isn't in the source.
+            2. **TONE**: Professional, Industrial, Objective. Avoid emotional adjectives.
+            3. **FORMATTING**:
+               - Organize the translated text into HTML structure.
+               - If the input contains specs/parameters, force them into an HTML <table>.
+               - Use <h2> tags styled: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
+               - Use <p> tags for text.
+            4. **IMAGES**:
+               - Insert <img src="filename" alt="[Description] {target_kw}" style="width:100%; border-radius:8px; margin:20px 0;">.
+               - Alt Text must be descriptive and include the target keyword.
+            5. **META & SCHEMA** (Create these based on the content):
+               - Generate Meta Title/Description.
+               - Generate JSON-LD Schema (`{cinfo['type']}`).
             
-            [SECTION 3: SCHEMA]
-            - JSON-LD code for `{cinfo['type']}` AND `FAQPage`.
+            OUTPUT SECTIONS:
+            [SECTION 1: METADATA] (Slug, Title, Desc)
+            [SECTION 2: HTML CONTENT] (The translated body code)
+            [SECTION 3: SCHEMA] (The JSON-LD code)
             """
             
-            with st.spinner(f"正在为 {cinfo['name']} 生成 SEO 代码 (优化 Alt 属性)..."):
+            with st.spinner(f"正在进行高保真翻译与 SEO 封装 ({sel_model})..."):
                 try:
                     final_res = ""
-                    # Gemini (推荐)：因为它能看见图片，所以 Alt Text 写得最准
                     if engine_choice == "Google Gemini":
-                        cnt = [sys_p, f"Input:\n{cn_txt}"]
+                        cnt = [sys_p, f"Input Text:\n{cn_txt}"]
                         if imgs:
                             cnt.append("\nImages:")
                             for f in imgs: cnt.extend([f"\nFile: {f.name}", Image.open(f)])
                         genai.configure(api_key=api_key)
                         final_res = genai.GenerativeModel(sel_model).generate_content(cnt).text
                     else:
-                        # 智谱/阿里：根据文件名猜 Alt Text
                         img_note = f"\nImages: {', '.join([f.name for f in imgs])}" if imgs else ""
                         full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
                         if engine_choice == "智谱清言":
@@ -347,7 +350,7 @@ with tab3:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_res = resp.output.text
 
-                    st.success(f"✅ 发布包构建完成！Alt Text 已包含关键词 '{target_kw}'")
+                    st.success("✅ 翻译完成！内容已精准对应原文。")
                     
                     with st.expander("📝 1. SEO 元数据 (Meta)", expanded=True):
                         try: st.code(final_res.split("[SECTION 2")[0], language="yaml")
@@ -355,9 +358,11 @@ with tab3:
                     
                     with st.expander("📄 2. 网页正文 (HTML)", expanded=True):
                         try:
+                            # 提取 HTML 并拼接硬编码模块
                             html_part = final_res.split("[SECTION 2: HTML CONTENT]")[1].split("[SECTION 3")[0]
                             if cinfo['name'] == "Wellucky":
                                 html_part += wellucky_cta_html
+                            
                             st.markdown(html_part, unsafe_allow_html=True)
                             st.code(html_part, language="html")
                         except: st.code(final_res, language="html")
