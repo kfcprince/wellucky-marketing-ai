@@ -4,12 +4,12 @@ import dashscope
 from dashscope import ImageSynthesis, MultiModalConversation
 from zhipuai import ZhipuAI
 from PIL import Image, ImageDraw, ImageFont
-import io, base64, re, os, requests, uuid
+import io, base64, re, os, requests, uuid, zipfile # 新增 zipfile
 
 # ==========================================
 # 0. 全局配置 & 初始化
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.5", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V29.6", layout="wide", page_icon="🦁")
 
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
@@ -63,7 +63,7 @@ def run_ai_vision(engine, img, prompt, key, model_name):
         
         elif engine == "智谱清言":
             client = ZhipuAI(api_key=key)
-            vision_model = "glm-4v" # 智谱识图固定用这个，比较稳
+            vision_model = "glm-4v"
             b64_img = pil_to_base64_safe(img)
             response = client.chat.completions.create(
                 model=vision_model,
@@ -87,7 +87,6 @@ def run_ai_vision(engine, img, prompt, key, model_name):
         return "Error: 未知引擎"
     except Exception as e: return f"Error: {str(e)}"
 
-# 带重试机制
 def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2):
     for attempt in range(max_retries):
         res = run_ai_vision(engine, img, prompt, key, model_name)
@@ -95,12 +94,11 @@ def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2
     return res
 
 # ==========================================
-# 3. 侧边栏配置 (已更新模型列表)
+# 3. 侧边栏配置
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 配置 V29.5")
+    st.title("⚙️ 配置 V29.6")
     
-    # 业务选择
     st.subheader("1. 业务模式")
     biz_choice = st.radio("Business", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), label_visibility="collapsed")
     cbiz = "logistics" if "VastLog" in biz_choice else "house"
@@ -108,22 +106,15 @@ with st.sidebar:
     
     st.divider()
     
-    # 引擎选择
     st.subheader("2. AI 引擎")
     engine_choice = st.radio("Vendor", ("Google Gemini", "智谱清言", "阿里通义"))
     
     if engine_choice == "Google Gemini":
-        # 【核心修正】只保留您指定的3个模型
-        model_options = [
-            "gemini-3-pro-preview",
-            "gemini-3-flash-preview", 
-            "gemini-2.5-pro"
-        ]
+        model_options = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = GOOGLE_API_KEY
-        
     elif engine_choice == "智谱清言":
-        model_options = ["glm-4v", "glm-4v-flash"] # 智谱识图只保留带V的
+        model_options = ["glm-4v", "glm-4v-flash"]
         sel_model = st.selectbox("模型版本", model_options, index=0)
         api_key = ZHIPU_API_KEY
     else:
@@ -152,12 +143,10 @@ with tab1:
         st.session_state.results_tab1 = []
         kw_str = ", ".join(cinfo['keywords'][:4])
         
-        # 【核心修正】Prompt升级：强制要求识别视觉差异，防止重名
         prompt_seo = f"""
         Role: SEO Expert for {cinfo['name']}.
         Task: Create a UNIQUE filename for this image.
         Keywords to use: {kw_str}.
-        
         CRITICAL RULES:
         1. Analyze specific visual details: Color? Angle? Interior/Exterior? Roof style?
         2. Format: {cinfo['name'].lower()}-feature-detail-keyword.
@@ -173,16 +162,12 @@ with tab1:
             img = Image.open(f)
             # 1. 起名
             raw_name = run_ai_vision_with_retry(engine_choice, img, prompt_seo, api_key, sel_model)
-            
-            # 清洗 & 强制去重逻辑
             clean_name = re.sub(r'[^a-z0-9-]', '', raw_name.strip().lower().replace(" ", "-").replace("_", "-"))
-            # 移除多余连字符
             clean_name = re.sub(r'-+', '-', clean_name).strip('-')
             
             if not clean_name.startswith(cinfo['name'].lower()):
                 clean_name = f"{cinfo['name'].lower()}-{clean_name}"
             
-            # 如果文件名太短（说明AI又偷懒了），强制加个后缀
             if len(clean_name.split('-')) < 3:
                  clean_name = f"{clean_name}-{uuid.uuid4().hex[:4]}"
 
@@ -194,26 +179,51 @@ with tab1:
             st.session_state.results_tab1.append({"img": img, "name": f"{clean_name}.webp", "text": copy_text, "data": convert_to_webp(img)})
             bar.progress((i+1)/len(files_t1))
 
-    # 【核心修正】解决 DuplicateElementId 报错
+    # --- 批量操作区 (核心升级) ---
     if st.session_state.results_tab1:
         st.divider()
-        for i, res in enumerate(st.session_state.results_tab1): # 使用 index i
+        st.markdown("### 🛠️ 批量操作区")
+        
+        # 定义两列：批量下载 和 清空
+        col_down, col_clear = st.columns([1, 1])
+        
+        with col_down:
+            # 创建 ZIP 压缩包
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for res in st.session_state.results_tab1:
+                    # 将每张图片写入 ZIP
+                    zf.writestr(res['name'], res['data'])
+            
+            st.download_button(
+                label=f"📦 批量下载 {len(st.session_state.results_tab1)} 张图片 (ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name=f"{cinfo['name'].lower()}-batch-images.zip",
+                mime="application/zip",
+                use_container_width=True,
+                type="primary"
+            )
+            st.caption("⚠️ 浏览器安全限制：批量下载必须打包为 ZIP 格式，否则会被拦截。")
+
+        with col_clear:
+            if st.button("🗑️ 清空当前列表 (开始下一批)", use_container_width=True):
+                st.session_state.results_tab1 = []
+                st.rerun()
+
+        st.divider()
+        st.markdown("### 🖼️ 结果预览")
+        
+        # 单图展示
+        for i, res in enumerate(st.session_state.results_tab1):
             l, r = st.columns([1, 3])
             l.image(res['img'], width=150)
             with r:
-                # 给所有组件加上唯一的 key (使用 i 和 uuid)，即使文件名一样也不会崩
                 unique_key = f"{i}_{uuid.uuid4()}"
-                
                 st.text_input("SEO文件名", res['name'], key=f"name_{unique_key}")
                 if res['text']: st.text_area("文案", res['text'], height=80, key=f"txt_{unique_key}")
                 
-                # 这里的 key 是修复报错的关键
-                st.download_button(
-                    label="下载WebP", 
-                    data=res['data'], 
-                    file_name=res['name'], 
-                    key=f"dl_{unique_key}" 
-                )
+                # 依然保留单图下载功能
+                st.download_button("⬇️ 单图下载", res['data'], res['name'], key=f"dl_{unique_key}")
 
 # --- Tab 2: 封面工厂 ---
 with tab2:
@@ -291,7 +301,7 @@ with tab3:
                         full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
                         if engine_choice == "智谱清言":
                             client = ZhipuAI(api_key=api_key)
-                            t_model = "glm-4-plus" # 智谱翻译用这个强一点
+                            t_model = "glm-4-plus" 
                             resp = client.chat.completions.create(model=t_model, messages=[{"role":"user","content":full_p}])
                             final_html = resp.choices[0].message.content
                         else:
