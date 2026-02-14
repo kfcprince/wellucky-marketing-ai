@@ -265,19 +265,20 @@ with tab2:
 # --- Tab 3: GEO/AIO 专家 (高保真 + Wellucky 专属) ---
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
-    st.markdown(f"##### 🛡️ 高保真发布套件 (当前对象: **{cinfo['name']}**)")
+    st.markdown(f"##### 🛡️ CMS 镜像发布套件 (当前对象: **{cinfo['name']}**)")
     
+    # 输入区保持不变
     cc1, cc2 = st.columns([1, 1])
     with cc1: 
-        cn_txt = st.text_area("中文原文 / 产品参数", height=300, placeholder="粘贴内容...")
+        cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
         target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成高保真英文代码", type="primary", use_container_width=True):
+    if st.button("✨ 生成内容 (按后台顺序排列)", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # Wellucky 专属板块 (硬编码)
+            # Wellucky 专属 CTA (硬编码)
             wellucky_cta_html = """
 <div style="margin: 40px 0; padding: 50px 30px; background: #1a1a1a; color: #fff; border-radius: 20px; text-align: center;">
     <h3 style="font-size: 28px; margin-bottom: 15px; color: #fff;">Why Choose Wellucky?</h3>
@@ -293,35 +294,53 @@ with tab3:
 </div>
             """
 
-            # 提示词：强制保真
+            # 提示词：要求 AI 按特定标记输出，方便切割
             sys_p = f"""
-            Role: Professional Technical Translator for {cinfo['name']} ({cinfo['website']}). 
+            Role: SEO Specialist for {cinfo['name']}. 
+            Task: Generate content for CMS backend.
+            Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
             
-            MISSION: 
-            Translate the user's Chinese text to English.
+            CRITICAL INSTRUCTIONS:
+            1. Translate & Optimize Content (EEAT).
+            2. Strictly follow the output format below using separators.
+            3. **Alt Text Rule**: Must include target keyword.
+            4. **HTML Body**: Include H2/H3, Table, Images. 
+               - H2 Style: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
+            5. **FAQ Data**: Extract 3 pairs of Q&A separately.
+            6. **Schema**: JSON-LD for {cinfo['type']}.
             
-            CRITICAL RULES:
-            1. **STRICT FIDELITY**: Translate accurately. Do NOT summarize. Do NOT delete details. Do NOT add marketing fluff.
-            2. **TONE**: Professional, Industrial.
-            3. **FORMATTING**:
-               - Organize text into HTML.
-               - If input has specs, make an HTML <table>.
-               - Use <h2> tags styled: style="border-left:5px solid {cinfo['color']}; padding-left:10px;"
-            4. **IMAGES**:
-               - Insert <img src="filename" alt="[Description] {target_kw}" style="width:100%; border-radius:8px; margin:20px 0;">.
-               - Alt text MUST describe image content AND include target keyword.
-            5. **META & SCHEMA**:
-               - Generate Meta Title/Description.
-               - Generate JSON-LD Schema (`{cinfo['type']}`).
+            OUTPUT FORMAT (Do not change separators):
             
-            OUTPUT SECTIONS:
-            [SECTION 1: METADATA] (Slug, Title, Desc)
-            [SECTION 2: HTML CONTENT] (Body)
-            [SECTION 3: SCHEMA] (JSON-LD)
+            |||TITLE|||
+            (Insert SEO Title here, Max 60 chars)
+            
+            |||SLUG|||
+            (Insert URL slug here, lowercase hyphens)
+            
+            |||KEYWORDS|||
+            (Insert 5-8 comma separated keywords)
+            
+            |||DESCRIPTION|||
+            (Insert SEO Description, Max 160 chars)
+            
+            |||CONTENT|||
+            (Insert full HTML body code here. Do NOT include <html> or <body> tags, just the inner content.)
+            
+            |||FAQ_LIST|||
+            Q1: ...
+            A1: ...
+            Q2: ...
+            A2: ...
+            Q3: ...
+            A3: ...
+            
+            |||SCHEMA|||
+            (Insert JSON-LD code)
             """
             
-            with st.spinner(f"正在进行高保真翻译 ({sel_model})..."):
+            with st.spinner(f"正在构建 {cinfo['name']} 专属数据包..."):
                 try:
+                    # AI 调用
                     final_res = ""
                     if engine_choice == "Google Gemini":
                         cnt = [sys_p, f"Input Text:\n{cn_txt}"]
@@ -341,24 +360,52 @@ with tab3:
                             resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
                             final_res = resp.output.text
 
-                    st.success("✅ 翻译完成！")
-                    
-                    with st.expander("📝 1. SEO 元数据 (Meta)", expanded=True):
-                        try: st.code(final_res.split("[SECTION 2")[0], language="yaml")
-                        except: st.code(final_res)
-                    
-                    with st.expander("📄 2. 网页正文 (HTML)", expanded=True):
-                        try:
-                            html_part = final_res.split("[SECTION 2: HTML CONTENT]")[1].split("[SECTION 3")[0]
-                            # Wellucky 专属拼接
-                            if cinfo['name'] == "Wellucky":
-                                html_part += wellucky_cta_html
-                            st.markdown(html_part, unsafe_allow_html=True)
-                            st.code(html_part, language="html")
-                        except: st.code(final_res, language="html")
+                    # ==========================================
+                    # 解析 AI 返回的数据，并按 CMS 顺序展示
+                    # ==========================================
+                    try:
+                        # 简单的文本切割提取
+                        p_title = final_res.split("|||TITLE|||")[1].split("|||")[0].strip()
+                        p_slug = final_res.split("|||SLUG|||")[1].split("|||")[0].strip()
+                        p_kws = final_res.split("|||KEYWORDS|||")[1].split("|||")[0].strip()
+                        p_desc = final_res.split("|||DESCRIPTION|||")[1].split("|||")[0].strip()
+                        p_content = final_res.split("|||CONTENT|||")[1].split("|||")[0].strip()
+                        p_faq = final_res.split("|||FAQ_LIST|||")[1].split("|||")[0].strip()
+                        p_schema = final_res.split("|||SCHEMA|||")[1].strip()
+                        
+                        # 处理 HTML (Wellucky 拼接)
+                        if cinfo['name'] == "Wellucky":
+                            p_content += wellucky_cta_html
+                            # 把 Schema 也拼接到 HTML 末尾，防止用户忘贴
+                            p_content += f"\n\n<!-- SEO Schema -->\n<script type=\"application/ld+json\">\n{p_schema}\n</script>"
+                        else:
+                            p_content += f"\n\n<!-- SEO Schema -->\n<script type=\"application/ld+json\">\n{p_schema}\n</script>"
 
-                    with st.expander("🤖 3. Schema 结构化数据"):
-                        try: st.code(final_res.split("[SECTION 3: SCHEMA]")[1], language="json")
-                        except: pass
+                        # ==========================================
+                        # 界面渲染：严格按照截图顺序
+                        # ==========================================
+                        st.success("✅ 生成成功！请按照下方顺序依次复制到后台：")
+                        
+                        st.markdown("### 1. 基础字段")
+                        c_t, c_s = st.columns([2, 1])
+                        c_t.text_input("📋 1. 主题 (Title)", value=p_title)
+                        c_s.text_input("🔗 2. 自定义URL", value=p_slug)
+                        
+                        st.markdown("### 2. SEO 字段")
+                        st.text_input("🔑 3. 关键字", value=p_kws)
+                        st.text_area("📝 4 & 5. 描述 / 摘要", value=p_desc, height=100)
+                        
+                        st.markdown("### 3. 内容编辑器")
+                        st.info("💡 请点击编辑器左上角的 [HTML] 按钮，粘贴下方代码：")
+                        with st.expander("📄 6. 内容 (HTML + Schema + CTA)", expanded=True):
+                            st.code(p_content, language="html")
+                        
+                        st.markdown("### 4. 底部 FAQ 模块 (如有)")
+                        with st.expander("❓ 7. FAQ 问答对 (如有独立输入框)", expanded=False):
+                            st.text(p_faq)
+
+                    except Exception as parse_e:
+                        st.error("解析格式略有偏差，显示原始内容，请手动复制：")
+                        st.code(final_res)
 
                 except Exception as e: st.error(f"Error: {str(e)}")
