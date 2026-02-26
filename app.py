@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components # 新增：用于完美渲染HTML
 import google.generativeai as genai
 import dashscope 
 from dashscope import ImageSynthesis, MultiModalConversation, Generation
@@ -9,7 +10,7 @@ import io, base64, re, os, requests, uuid, zipfile
 # ==========================================
 # 0. 全局配置 & 初始化
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V32.1", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V35.1", layout="wide", page_icon="🦁")
 
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
@@ -22,7 +23,6 @@ GOOGLE_API_KEY = get_secret_safe("GOOGLE_API_KEY")
 ALI_API_KEY = get_secret_safe("ALI_API_KEY")
 ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
 
-# 业务配置 (已包含 Action CTA)
 BIZ_CONFIG = {
     "logistics": {
         "name": "VastLog", 
@@ -43,7 +43,7 @@ BIZ_CONFIG = {
 }
 
 # ==========================================
-# 1. 核心工具函数
+# 1. 核心工具函数 (修复：文件名清洗)
 # ==========================================
 def get_font(size):
     try: return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
@@ -63,6 +63,23 @@ def pil_to_base64_safe(img):
         img.thumbnail((max_side, max_side))
     img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+# 【关键修复】文件名强力清洗函数
+def clean_filename_logic(raw_text, brand):
+    # 1. 转小写，去空格
+    name = raw_text.strip().lower().replace(" ", "-").replace("_", "-")
+    # 2. 移除扩展名 (jpg, png, webp)
+    name = re.sub(r'\.(jpg|jpeg|png|webp)$', '', name)
+    # 3. 只保留字母数字和连字符
+    name = re.sub(r'[^a-z0-9-]', '', name)
+    # 4. 修复多余连字符
+    name = re.sub(r'-+', '-', name).strip('-')
+    # 5. 确保品牌开头
+    if not name.startswith(brand.lower()):
+        name = f"{brand.lower()}-{name}"
+    # 6. 【防重名】强制添加 4位 随机哈希
+    unique_suffix = uuid.uuid4().hex[:4]
+    return f"{name}-{unique_suffix}"
 
 # ==========================================
 # 2. AI 调用逻辑
@@ -110,15 +127,13 @@ def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2
 # 3. 侧边栏配置
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 配置 V32.1")
-    
+    st.title("⚙️ 配置 V35.1")
     st.subheader("1. 业务模式")
     biz_choice = st.radio("Business", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), label_visibility="collapsed")
     cbiz = "logistics" if "VastLog" in biz_choice else "house"
     cinfo = BIZ_CONFIG[cbiz]
     
     st.divider()
-    
     st.subheader("2. AI 引擎")
     engine_choice = st.radio("Vendor", ("Google Gemini", "智谱清言", "阿里通义"))
     
@@ -142,7 +157,7 @@ st.title(f"🦁 {cinfo['name']} 数字化运营台")
 st.caption(f"Current Model: {sel_model}")
 tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GEO/AIO 专家"])
 
-# --- Tab 1: 智能文案 ---
+# --- Tab 1: 智能文案 (已修复命名重复 & 后缀问题) ---
 with tab1:
     c1, c2 = st.columns([1, 1])
     files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1")
@@ -156,69 +171,68 @@ with tab1:
         st.session_state.results_tab1 = []
         kw_str = ", ".join(cinfo['keywords'][:4])
         
+        # =========================================================
+        # V35.3 核心：防偷懒 Prompt
+        # 强制 AI 必须描述独特的视觉特征，而不是只给个通用名
+        # =========================================================
         prompt_seo = f"""
-        Role: SEO Expert for {cinfo['name']}.
-        Task: Create a UNIQUE filename for this image.
-        Keywords: {kw_str}.
-        CRITICAL RULES:
-        1. Analyze specific visual details: Color? Angle? Details?
-        2. Format: {cinfo['name'].lower()}-feature-detail-keyword.
-        3. No generic names. Be specific.
-        4. Lowercase, hyphens only.
-        5. Output ONLY the filename string.
+        Role: Senior SEO Specialist for {cinfo['name']}.
+        Task: Generate a UNIQUE, descriptively rich filename for this specific image.
+        Target Keywords: {kw_str}.
+        
+        [MANDATORY NAMING FORMULA]
+        {cinfo['name'].lower()} - [Core Product] - [VISUAL DIFFERENTIATOR]
+        
+        [RULES FOR "VISUAL DIFFERENTIATOR"]
+        You MUST describe what makes THIS image different from others. Look for:
+        1. Viewpoint (e.g., front-view, aerial-view, interior-bedroom, close-up-steel-frame)
+        2. Action/Context (e.g., installation-site, loading-truck, solar-roof-detail)
+        3. Features (e.g., glass-sliding-door, foldable-wall, white-panel)
+        
+        [PROHIBITED]
+        - DO NOT just say "{cinfo['name'].lower()}-container-house". That is LAZY.
+        - DO NOT include file extensions (.jpg).
+        - Use lowercase and hyphens only.
         """
         
         prompt_copy = f"Write a Facebook post for {cinfo['name']}. Context: {draft}."
         
         bar = st.progress(0)
+        name_counter = {} # 计数器（仅作为最后的防撞车保险）
+        
         for i, f in enumerate(files_t1):
             img = Image.open(f)
-            # 1. 起名
+            
+            # 1. AI 尽力起名 (包含视觉细节)
             raw_name = run_ai_vision_with_retry(engine_choice, img, prompt_seo, api_key, sel_model)
-            clean_name = re.sub(r'[^a-z0-9-]', '', raw_name.strip().lower().replace(" ", "-").replace("_", "-"))
-            clean_name = re.sub(r'-+', '-', clean_name).strip('-')
             
-            if not clean_name.startswith(cinfo['name'].lower()):
-                clean_name = f"{cinfo['name'].lower()}-{clean_name}"
-            
-            if len(clean_name.split('-')) < 3:
-                 clean_name = f"{clean_name}-{uuid.uuid4().hex[:4]}"
+            # 2. 清洗
+            base_name = raw_name.strip().lower().replace(" ", "-").replace("_", "-")
+            base_name = re.sub(r'[^a-z0-9-]', '', base_name)
+            base_name = re.sub(r'-+', '-', base_name).strip('-')
+            base_name = re.sub(r'\.(jpg|jpeg|png|webp)$', '', base_name)
 
-            # 2. 文案
+            if not base_name.startswith(cinfo['name'].lower()):
+                base_name = f"{cinfo['name'].lower()}-{base_name}"
+            
+            # 3. 智能序列号 (仅在 AI 起名真的撞车时才触发)
+            if base_name in name_counter:
+                name_counter[base_name] += 1
+                seq_num = name_counter[base_name]
+                final_name = f"{base_name}-{seq_num:02d}" # 撞车了，没办法，加序号
+            else:
+                name_counter[base_name] = 1
+                final_name = base_name # 没撞车，保留 AI 的精准描述 (High Value SEO)
+
+            # 4. 文案
             copy_text = ""
             if btn_full:
                 copy_text = run_ai_vision(engine_choice, img, prompt_copy, api_key, sel_model)
             
-            st.session_state.results_tab1.append({"img": img, "name": f"{clean_name}.webp", "text": copy_text, "data": convert_to_webp(img)})
+            st.session_state.results_tab1.append({"img": img, "name": f"{final_name}.webp", "text": copy_text, "data": convert_to_webp(img)})
             bar.progress((i+1)/len(files_t1))
 
-    # 批量操作区
-    if st.session_state.results_tab1:
-        st.divider()
-        st.markdown("### 🛠️ 批量操作")
-        col_down, col_clear = st.columns([1, 1])
-        with col_down:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as zf:
-                for res in st.session_state.results_tab1:
-                    zf.writestr(res['name'], res['data'])
-            st.download_button(f"📦 批量下载 {len(st.session_state.results_tab1)} 张图片 (ZIP)", zip_buffer.getvalue(), f"{cinfo['name'].lower()}-batch.zip", "application/zip", use_container_width=True, type="primary")
-        with col_clear:
-            if st.button("🗑️ 清空列表", use_container_width=True):
-                st.session_state.results_tab1 = []
-                st.rerun()
-
-        st.divider()
-        for i, res in enumerate(st.session_state.results_tab1):
-            l, r = st.columns([1, 3])
-            l.image(res['img'], width=150)
-            with r:
-                ukey = f"{i}_{uuid.uuid4()}"
-                st.text_input("SEO文件名", res['name'], key=f"n_{ukey}")
-                if res['text']: st.text_area("文案", res['text'], height=80, key=f"t_{ukey}")
-                st.download_button("⬇️ 单图下载", res['data'], res['name'], key=f"d_{ukey}")
-
-# --- Tab 2: 封面工厂 ---
+# --- Tab 2: 封面工厂 (保持) ---
 with tab2:
     bg_col, txt_col = st.columns([1, 1])
     with bg_col:
@@ -262,7 +276,7 @@ with tab2:
         st.image(final, use_container_width=True)
         buf=io.BytesIO(); final.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
 
-# --- Tab 3: GEO/AIO 专家 (高保真 + Wellucky 专属) ---
+# --- Tab 3: GEO/AIO 专家 (修复：完美预览) ---
 with tab3:
     st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
     st.markdown(f"##### 🛡️ 完美排版 & 安全 SEO 套件 (当前对象: **{cinfo['name']}**)")
@@ -274,18 +288,14 @@ with tab3:
     with cc2: 
         imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
 
-    if st.button("✨ 生成完美排版 (已修复宽度 & 乱码)", type="primary", use_container_width=True):
+    if st.button("✨ 生成完美排版", type="primary", use_container_width=True):
         if not cn_txt: st.warning("请输入中文")
         else:
-            # ====================================================
-            # 1. Wellucky 专属 CTA (样式升级：变窄、居中、圆角)
-            # ====================================================
+            # Wellucky CTA
             wellucky_cta_html = """
 <div style="max-width: 700px; margin: 60px auto; padding: 40px 30px; background: #1a1a1a; color: #fff; border-radius: 16px; text-align: center; box-shadow: 0 15px 40px rgba(0,0,0,0.2);">
     <h3 style="font-size: 24px; margin-bottom: 15px; color: #fff; letter-spacing: 0.5px;">Why Choose Wellucky?</h3>
-    <p style="color: #ccc; font-size: 15px; margin-bottom: 25px; line-height: 1.6;">
-        We are a <strong>professional manufacturer since 2005</strong>. We offer comprehensive <strong>OEM/ODM services</strong>—from design consultation to final delivery.
-    </p>
+    <p style="color: #ccc; font-size: 15px; margin-bottom: 25px; line-height: 1.6;">We are a <strong>professional manufacturer since 2005</strong>. We offer comprehensive <strong>OEM/ODM services</strong>.</p>
     <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px;">
         <a href="https://www.welluckyhouse.com/contact" target="_blank" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; font-size: 16px;">GET A QUOTE</a>
         <a href="mailto:info@welluckyhouse.com" style="border: 1px solid #fff; color: #fff; text-decoration: none; padding: 11px 30px; border-radius: 50px; font-weight: bold; font-size: 16px;">EMAIL US</a>
@@ -293,39 +303,24 @@ with tab3:
 </div>
             """
 
-            # ====================================================
-            # 2. 核心提示词：改用 Microdata (防止 CMS 拦截)
-            # ====================================================
+            # 提示词
             sys_p = f"""
-            Role: SEO & Web Designer for {cinfo['name']}.
-            Task: Translate & Format.
+            Role: SEO & Web Designer for {cinfo['name']}. Task: Translate & Format.
             Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
-            
-            [RULE 1: NO SCRIPTS]
-            - **DO NOT** use `<script>`. Your CMS blocks it.
-            - **USE MICRODATA**: Embed Schema directly into HTML tags using `itemscope`, `itemtype`, `itemprop`.
-            - Example: `<div itemscope itemtype="https://schema.org/Product">... <h1 itemprop="name">Title</h1> ...</div>`
-            
-            [RULE 2: TRANSLATION FIDELITY]
-            - Translate Chinese to English accurately. No fluff. Professional tone.
-            
-            [RULE 3: LAYOUT & STYLE]
-            - Use <h2> tags styled: style="color:#2c3e50; border-bottom: 2px solid {cinfo['color']}; padding-bottom:10px; margin-top:40px;"
-            - Use HTML Tables for specs (styled nicely).
-            - **Images**: <img src="filename" alt="{target_kw} detail" style="width:100%; border-radius:8px; margin:20px 0; box-shadow:0 5px 15px rgba(0,0,0,0.1);">
+            [RULE 1: NO SCRIPTS] USE MICRODATA in HTML tags. No <script>.
+            [RULE 2: FIDELITY] Translate accurately.
+            [RULE 3: STYLE] Use <h2> styled (border-left brand color). HTML Tables for specs. Images with alt text.
             
             OUTPUT FORMAT:
             |||TITLE|||...
             |||SLUG|||...
             |||KEYWORDS|||...
             |||DESCRIPTION|||...
-            |||CONTENT|||
-            (Output the HTML body directly. Wrap the whole content in: <article itemscope itemtype="https://schema.org/{cinfo['type']}"> ... </article>)
+            |||CONTENT|||... (HTML Body)
             """
             
-            with st.spinner("正在排版 (锁定宽度 900px + 注入 Microdata)..."):
+            with st.spinner("正在排版..."):
                 try:
-                    # AI 调用
                     final_res = ""
                     if engine_choice == "Google Gemini":
                         cnt = [sys_p, f"Input Text:\n{cn_txt}"]
@@ -351,27 +346,13 @@ with tab3:
                         p_slug = final_res.split("|||SLUG|||")[1].split("|||")[0].strip()
                         p_kws = final_res.split("|||KEYWORDS|||")[1].split("|||")[0].strip()
                         p_desc = final_res.split("|||DESCRIPTION|||")[1].split("|||")[0].strip()
-                        p_content_raw = final_res.split("|||CONTENT|||")[1].split("|||")[0].strip()
+                        p_content_raw = final_res.split("|||CONTENT|||")[1].strip()
                         
-                        # ==========================================
-                        # 3. Python 物理排版引擎 (Physical Layout Engine)
-                        # ==========================================
-                        
-                        # 步骤 A: 拼接 Wellucky CTA
-                        if cinfo['name'] == "Wellucky":
-                            p_content_raw += wellucky_cta_html
+                        # 拼接 + 容器
+                        if cinfo['name'] == "Wellucky": p_content_raw += wellucky_cta_html
+                        final_html_output = f"""<div style="max-width: 900px; margin: 0 auto; font-family: sans-serif; line-height: 1.8; color: #333; padding: 20px;">{p_content_raw}</div>"""
 
-                        # 步骤 B: 强制宽度容器 (Wrapper)
-                        # 这一步是关键！我们在所有内容外面套一个 900px 的 div
-                        final_html_output = f"""
-<!-- 宽度限制容器 Start -->
-<div style="max-width: 900px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.8; color: #333; padding: 20px;">
-    {p_content_raw}
-</div>
-<!-- 宽度限制容器 End -->
-"""
-
-                        st.success("✅ 完美排版生成！已解决宽度过大和乱码问题。")
+                        st.success("✅ 生成成功！")
                         
                         st.markdown("### 1. 基础字段")
                         c_t, c_s = st.columns([2, 1])
@@ -382,13 +363,18 @@ with tab3:
                         st.text_input("🔑 3. 关键字", value=p_kws)
                         st.text_area("📝 4 & 5. 描述 / 摘要", value=p_desc, height=100)
                         
-                        st.markdown("### 3. 内容编辑器 (Microdata 内嵌版)")
-                        st.info("💡 这里的代码已经包含了 '隐形 Schema' 和 '宽度限制'。请直接点击 [HTML] 按钮粘贴。")
-                        with st.expander("📄 6. 内容 (HTML)", expanded=True):
-                            st.code(final_html_output, language="html")
+                        st.markdown("### 3. 内容编辑器")
+                        st.info("💡 请点击编辑器左上角的 [HTML] 按钮粘贴。预览如下：")
+                        
+                        # 【核心修复】使用 components.html 完美渲染，不再显示代码
+                        with st.expander("📄 预览 & 代码", expanded=True):
+                            # 1. 清洗掉可能存在的markdown符号
+                            clean_code = final_html_output.replace("```html", "").replace("```", "")
+                            # 2. 真实渲染
+                            components.html(clean_code, height=600, scrolling=True)
                             st.divider()
-                            st.caption("👇 实际宽度预览 (900px):")
-                            st.markdown(final_html_output, unsafe_allow_html=True)
+                            st.caption("复制代码：")
+                            st.code(clean_code, language="html")
 
                     except Exception as parse_e:
                         st.error("解析格式略有偏差，请手动复制：")
