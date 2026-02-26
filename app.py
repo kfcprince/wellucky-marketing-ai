@@ -10,7 +10,7 @@ import io, base64, re, os, requests, uuid, zipfile, time
 # ==========================================
 # 0. 全局配置
 # ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V36.0", layout="wide", page_icon="🦁")
+st.set_page_config(page_title="Wellucky & VastLog 运营中台 V38.0 (精简版)", layout="wide", page_icon="🦁")
 
 if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
 if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
@@ -26,25 +26,24 @@ ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
 BIZ_CONFIG = {
     "logistics": {
         "name": "VastLog", "website": "www.vastlog.com", "color": "#FF9900", 
-        "type": "LogisticsService", "keywords": ["logistics", "shipping", "freight", "cargo"],
+        "type": "LogisticsService", "keywords": ["logistics", "shipping", "freight", "cargo", "DDP"],
         "action": "Get a Free Shipping Quote"
     },
     "house": {
         "name": "Wellucky", "website": "www.welluckyhouse.com", "color": "#0066CC", 
-        "type": "Product", "keywords": ["container house", "modular home", "prefab"],
+        "type": "Product", "keywords": ["container house", "modular home", "prefab", "steel structure"],
         "action": "Customize Your Container Home"
     }
 }
 
 # ==========================================
-# 1. 核心工具 (加入防卡死图片压缩)
+# 1. 核心工具 (外科手术级清洗 + 图片压缩)
 # ==========================================
 def get_font(size):
     try: return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
     except: return ImageFont.load_default()
 
 def resize_image_for_api(img, max_size=1500):
-    """预处理：压缩图片尺寸，防止API超时卡死"""
     if img.mode != 'RGB': img = img.convert('RGB')
     if img.width > max_size or img.height > max_size:
         img.thumbnail((max_size, max_size))
@@ -52,7 +51,7 @@ def resize_image_for_api(img, max_size=1500):
 
 def convert_to_webp(image):
     buf = io.BytesIO()
-    img = resize_image_for_api(image, 1500) # 转换前也压缩一下
+    img = resize_image_for_api(image, 1500)
     img.save(buf, format='WEBP', quality=85)
     return buf.getvalue()
 
@@ -62,15 +61,31 @@ def pil_to_base64_safe(img):
     img.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
+# 外科手术级文件名清洗逻辑
+def surgical_clean_filename(raw_text, brand):
+    text = raw_text.lower().strip()
+    garbage_prefixes = ['filename:', 'file name:', 'output:', 'name:', 'title:', 'seo filename:']
+    for p in garbage_prefixes: text = text.replace(p, '')
+    text = re.sub(r'\.(jpg|jpeg|png|webp|gif|bmp)$', '', text)
+    text = text.replace(brand.lower(), '')
+    stop_words = ['image', 'photo', 'picture', 'view', 'of', 'the', 'a', 'an', 'angle']
+    for word in stop_words: text = re.sub(fr'\b{word}\b', '', text)
+    text = re.sub(r'[^a-z0-9]', ' ', text)
+    words = text.split()
+    clean_text = "-".join(words)
+    if clean_text:
+        final_name = f"{brand.lower()}-{clean_text}"
+    else:
+        final_name = f"{brand.lower()}-product"
+    return final_name
+
 # ==========================================
-# 2. AI 调用逻辑 (增强稳定性)
+# 2. AI 调用逻辑
 # ==========================================
 def run_ai_vision(engine, img, prompt, key, model_name):
     if not key: return "Error: 缺少 API Key"
     try:
-        # 统一预处理图片，防止卡顿
         processed_img = resize_image_for_api(img)
-        
         if engine == "Google Gemini":
             genai.configure(api_key=key)
             model = genai.GenerativeModel(model_name)
@@ -105,15 +120,14 @@ def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2
         try:
             res = run_ai_vision(engine, img, prompt, key, model_name)
             if res and not res.startswith("Error"): return res
-        except:
-            time.sleep(1) # 失败稍微等一下
-    return f"{uuid.uuid4().hex[:8]}" # 如果全失败，返回随机码保底，防止程序崩
+        except: time.sleep(1)
+    return f"item-{uuid.uuid4().hex[:6]}"
 
 # ==========================================
-# 3. 侧边栏配置
+# 3. 侧边栏
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ 配置 V36.0")
+    st.title("⚙️ 配置 V38.0")
     st.subheader("1. 业务模式")
     biz_choice = st.radio("Business", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), label_visibility="collapsed")
     cbiz = "logistics" if "VastLog" in biz_choice else "house"
@@ -136,18 +150,20 @@ with st.sidebar:
         api_key = ALI_API_KEY
 
 # ==========================================
-# 4. 主界面
+# 4. 主界面 (只保留两个 Tab)
 # ==========================================
 st.title(f"🦁 {cinfo['name']} 数字化运营台")
-st.caption(f"Engine: {engine_choice} | Model: {sel_model}")
-tab1, tab2, tab3 = st.tabs(["✍️ 智能文案", "🎨 封面工厂", "🌍 GEO/AIO 专家"])
+st.caption(f"Engine: {engine_choice} | Mode: Lite Version")
 
-# --- Tab 1: 智能文案 (修复卡顿问题) ---
+# 【修改点】这里只定义了两个 Tab
+tab1, tab2 = st.tabs(["✍️ 智能文案", "🎨 封面工厂"])
+
+# --- Tab 1: 智能文案 ---
 with tab1:
     c1, c2 = st.columns([1, 1])
     files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1")
     with c2:
-        draft = st.text_area("补充信息 (全套模式)", height=100)
+        draft = st.text_area("补充信息", height=100)
         b1, b2 = st.columns(2)
         btn_name = b1.button("🖼️ 仅识图起名", use_container_width=True)
         btn_full = b2.button("🚀 全套处理", type="primary", use_container_width=True)
@@ -156,60 +172,43 @@ with tab1:
         st.session_state.results_tab1 = []
         kw_str = ", ".join(cinfo['keywords'][:4])
         
-        # 强制视觉差异 Prompt
         prompt_seo = f"""
-        Role: SEO Expert for {cinfo['name']}.
-        Task: Create a UNIQUE filename based on VISUAL DIFFERENCES.
-        Keywords: {kw_str}.
-        Format: {cinfo['name'].lower()}-keyword-[VisualFeature].
-        Rules: Lowercase, hyphens only. No .jpg extension.
-        Focus on: Angle, Color, Context, Interior/Exterior.
+        Role: SEO Expert.
+        Task: Describe the visual content of this image in 3-5 keywords.
+        Keywords to use: {kw_str}.
+        [STRICT FORMAT]: keyword1-keyword2-visualdetail
+        [FORBIDDEN]: DO NOT output "Filename", "Image of", "{cinfo['name']}", "Angle", ".jpg".
         """
         
         prompt_copy = f"Write a Facebook post for {cinfo['name']}. Context: {draft}."
         
-        # 进度条 + 状态文本
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
         name_counter = {}
         
         for i, f in enumerate(files_t1):
-            # 【修复】显示实时进度，不再让用户以为卡死
-            status_text.info(f"⏳ 正在分析第 {i+1} / {len(files_t1)} 张图片: {f.name} ...")
-            
+            status_text.info(f"⏳ 处理中 ({i+1}/{len(files_t1)}): {f.name}")
             img = Image.open(f)
-            # 1. AI 起名 (带重试)
+            
             raw_name = run_ai_vision_with_retry(engine_choice, img, prompt_seo, api_key, sel_model)
+            clean_name = surgical_clean_filename(raw_name, cinfo['name'])
             
-            # 2. 清洗
-            base = raw_name.strip().lower().replace(" ", "-").replace("_", "-")
-            base = re.sub(r'[^a-z0-9-]', '', base)
-            base = re.sub(r'-+', '-', base).strip('-')
-            base = re.sub(r'\.(jpg|jpeg|png|webp)$', '', base) # 再次确保无后缀
-
-            if not base.startswith(cinfo['name'].lower()):
-                base = f"{cinfo['name'].lower()}-{base}"
-            
-            # 3. 序列号防重
-            if base in name_counter:
-                name_counter[base] += 1
-                fname = f"{base}-{name_counter[base]:02d}"
+            if clean_name in name_counter:
+                name_counter[clean_name] += 1
+                final_name = f"{clean_name}-{name_counter[clean_name]:02d}"
             else:
-                name_counter[base] = 1
-                fname = base
+                name_counter[clean_name] = 1
+                final_name = clean_name
 
-            # 4. 文案
             copy_txt = ""
             if btn_full:
                 copy_txt = run_ai_vision(engine_choice, img, prompt_copy, api_key, sel_model)
             
-            st.session_state.results_tab1.append({"img": img, "name": f"{fname}.webp", "text": copy_txt, "data": convert_to_webp(img)})
+            st.session_state.results_tab1.append({"img": img, "name": f"{final_name}.webp", "text": copy_txt, "data": convert_to_webp(img)})
             progress_bar.progress((i+1)/len(files_t1))
         
-        status_text.success("✅ 所有图片处理完成！")
+        status_text.success("✅ 完成！")
 
-    # 结果展示
     if st.session_state.results_tab1:
         st.divider()
         c_down, c_clear = st.columns([1, 1])
@@ -218,7 +217,7 @@ with tab1:
             with zipfile.ZipFile(zip_buf, "w") as zf:
                 for res in st.session_state.results_tab1:
                     zf.writestr(res['name'], res['data'])
-            st.download_button(f"📦 批量下载 ZIP ({len(st.session_state.results_tab1)}张)", zip_buf.getvalue(), "images.zip", "application/zip", use_container_width=True, type="primary")
+            st.download_button(f"📦 批量下载 ZIP", zip_buf.getvalue(), "images.zip", "application/zip", use_container_width=True, type="primary")
         with c_clear:
             if st.button("🗑️ 清空列表", use_container_width=True):
                 st.session_state.results_tab1 = []
@@ -233,7 +232,7 @@ with tab1:
                 st.text_input("文件名", res['name'], key=f"n_{ukey}")
                 if res['text']: st.text_area("文案", res['text'], height=60, key=f"t_{ukey}")
 
-# --- Tab 2: 封面工厂 (保持不变) ---
+# --- Tab 2: 封面工厂 ---
 with tab2:
     bg_col, txt_col = st.columns([1, 1])
     with bg_col:
@@ -276,109 +275,3 @@ with tab2:
         dr(t1,s1,c1,y1); dr(t2,s2,c2,y2); dr(t3,s3,c3,y3)
         st.image(final, use_container_width=True)
         buf=io.BytesIO(); final.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
-
-# --- Tab 3: GEO/AIO 专家 (修复：复制按钮消失) ---
-with tab3:
-    st.caption(f"当前引擎: {engine_choice} | 模型: {sel_model}")
-    st.markdown(f"##### 🛡️ 完美排版 & 安全 SEO 套件 (当前对象: **{cinfo['name']}**)")
-    
-    cc1, cc2 = st.columns([1, 1])
-    with cc1: 
-        cn_txt = st.text_area("中文原文 / 核心卖点", height=300, placeholder="粘贴内容...")
-        target_kw = st.text_input("🎯 目标关键词", placeholder="例如: Luxury Prefab House")
-    with cc2: 
-        imgs = st.file_uploader("配图 (AI自动插入)", accept_multiple_files=True, key="t3_imgs")
-
-    if st.button("✨ 生成完美排版", type="primary", use_container_width=True):
-        if not cn_txt: st.warning("请输入中文")
-        else:
-            # Wellucky CTA
-            wellucky_cta_html = """
-<div style="max-width: 700px; margin: 60px auto; padding: 40px 30px; background: #1a1a1a; color: #fff; border-radius: 16px; text-align: center; box-shadow: 0 15px 40px rgba(0,0,0,0.2);">
-    <h3 style="font-size: 24px; margin-bottom: 15px; color: #fff; letter-spacing: 0.5px;">Why Choose Wellucky?</h3>
-    <p style="color: #ccc; font-size: 15px; margin-bottom: 25px; line-height: 1.6;">We are a <strong>professional manufacturer since 2005</strong>. We offer comprehensive <strong>OEM/ODM services</strong>.</p>
-    <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 15px;">
-        <a href="https://www.welluckyhouse.com/contact" target="_blank" style="background: #1e7e34; color: #fff; text-decoration: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; font-size: 16px;">GET A QUOTE</a>
-        <a href="mailto:info@welluckyhouse.com" style="border: 1px solid #fff; color: #fff; text-decoration: none; padding: 11px 30px; border-radius: 50px; font-weight: bold; font-size: 16px;">EMAIL US</a>
-    </div>
-</div>
-            """
-
-            sys_p = f"""
-            Role: SEO & Web Designer for {cinfo['name']}. Task: Translate & Format.
-            Target Keyword: "{target_kw if target_kw else 'Auto-detect'}"
-            [RULE 1: NO SCRIPTS] USE MICRODATA in HTML. No <script>.
-            [RULE 2: FIDELITY] Translate accurately.
-            [RULE 3: STYLE] Use <h2> styled (border-left brand color). HTML Tables. Images with alt text.
-            
-            OUTPUT FORMAT:
-            |||TITLE|||...
-            |||SLUG|||...
-            |||KEYWORDS|||...
-            |||DESCRIPTION|||...
-            |||CONTENT|||... (HTML Body)
-            """
-            
-            with st.spinner("正在排版..."):
-                try:
-                    final_res = ""
-                    if engine_choice == "Google Gemini":
-                        cnt = [sys_p, f"Input Text:\n{cn_txt}"]
-                        if imgs:
-                            cnt.append("\nImages:")
-                            for f in imgs: cnt.extend([f"\nFile: {f.name}", Image.open(f)])
-                        genai.configure(api_key=api_key)
-                        final_res = genai.GenerativeModel(sel_model).generate_content(cnt).text
-                    else:
-                        img_note = f"\nImages: {', '.join([f.name for f in imgs])}" if imgs else ""
-                        full_p = sys_p + img_note + f"\n\nText:\n{cn_txt}"
-                        if engine_choice == "智谱清言":
-                            client = ZhipuAI(api_key=api_key)
-                            resp = client.chat.completions.create(model="glm-4-plus", messages=[{"role":"user","content":full_p}])
-                            final_res = resp.choices[0].message.content
-                        else:
-                            resp = Generation.call(model='qwen-max', messages=[{"role":"user","content":full_p}])
-                            final_res = resp.output.text
-
-                    # 解析
-                    try:
-                        p_title = final_res.split("|||TITLE|||")[1].split("|||")[0].strip()
-                        p_slug = final_res.split("|||SLUG|||")[1].split("|||")[0].strip()
-                        p_kws = final_res.split("|||KEYWORDS|||")[1].split("|||")[0].strip()
-                        p_desc = final_res.split("|||DESCRIPTION|||")[1].split("|||")[0].strip()
-                        p_content_raw = final_res.split("|||CONTENT|||")[1].strip()
-                        
-                        if cinfo['name'] == "Wellucky": p_content_raw += wellucky_cta_html
-                        final_html_output = f"""<div style="max-width: 900px; margin: 0 auto; font-family: sans-serif; line-height: 1.8; color: #333; padding: 20px;">{p_content_raw}</div>"""
-
-                        st.success("✅ 生成成功！")
-                        
-                        st.markdown("### 1. 基础字段")
-                        c_t, c_s = st.columns([2, 1])
-                        c_t.text_input("📋 1. 主题 (Title)", value=p_title)
-                        c_s.text_input("🔗 2. 自定义URL", value=p_slug)
-                        
-                        st.markdown("### 2. SEO 字段")
-                        st.text_input("🔑 3. 关键字", value=p_kws)
-                        st.text_area("📝 4 & 5. 描述 / 摘要", value=p_desc, height=100)
-                        
-                        st.markdown("### 3. 内容编辑器")
-                        
-                        # 【核心修复】分离 Tab：一个看效果，一个复制由 Streamlit 原生提供的带复制按钮的代码框
-                        tab_view, tab_code = st.tabs(["👁️ 效果预览 (不可复制)", "💻 获取 HTML 代码 (一键复制)"])
-                        
-                        with tab_view:
-                            # 清洗markdown符号用于预览
-                            clean_view = final_html_output.replace("```html", "").replace("```", "")
-                            components.html(clean_view, height=600, scrolling=True)
-                        
-                        with tab_code:
-                            st.info("👇 点击代码框右上角的 📄 图标即可一键复制全部代码")
-                            # 这里放原始代码，Streamlit 会自动加上复制按钮
-                            st.code(final_html_output, language="html")
-
-                    except Exception as parse_e:
-                        st.error("解析格式略有偏差，请手动复制：")
-                        st.code(final_res)
-
-                except Exception as e: st.error(f"Error: {str(e)}")
