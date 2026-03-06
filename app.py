@@ -245,30 +245,42 @@ def get_qianwen_client():
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
 
+def get_qianwen_vl_client():
+    # 视觉模型用国际接口更稳定
+    return OpenAI(
+        api_key=st.secrets["QIANWEN_API_KEY"],
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    )
+
 def clean_json(text):
     return re.sub(r"```json|```", "", text).strip()
 
 def identify_image_qianwen(img_file, page_name, brand_name, lang_key):
-    client = get_qianwen_client()
+    client = get_qianwen_vl_client()
+
+    # 压缩图片再传，避免大图失败
     img_file.seek(0)
-    b64 = base64.standard_b64encode(img_file.read()).decode("utf-8")
+    pil_img = Image.open(img_file).convert("RGB")
+    # 限制最大边长1024px
+    pil_img.thumbnail((1024, 1024), Image.LANCZOS)
+    buf = io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=85)
+    b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
     img_file.seek(0)
-    ext = img_file.name.lower().split(".")[-1]
-    media_type = {"png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
 
     resp = client.chat.completions.create(
         model="qwen-vl-plus",
         messages=[{
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}},
-                {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown):
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown, no explanation):
 {{
   "filename": "seo-filename-using-{page_name or 'image'}-prefix-max-5-words-lowercase-hyphens-no-extension",
-  "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key}, under 125 chars, factual",
-  "description": "one sentence factual description of image content"
+  "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key}, under 125 chars, factual description",
+  "description": "one sentence factual description of what this image shows"
 }}
-Brand: {brand_name or 'N/A'}. Do NOT exaggerate."""}
+Brand: {brand_name or 'N/A'}. Keep it factual, do NOT exaggerate."""}
             ]
         }],
         max_tokens=300
