@@ -2,7 +2,10 @@ import streamlit as st
 import base64
 import json
 import re
+import io
+import zipfile
 from openai import OpenAI
+from PIL import Image
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
