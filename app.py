@@ -2,9 +2,7 @@ import streamlit as st
 import base64
 import json
 import re
-import google.generativeai as genai
 from openai import OpenAI
-from PIL import Image
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -104,14 +102,10 @@ if not check_password():
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## ⚡ 内容优化流水线")
-st.markdown("<p style='color:#6b7280;font-size:14px;margin-top:-8px;margin-bottom:8px;'>图片识别（Gemini）· 翻译优化（通义千问）· SEO/GEO · 生成HTML</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:#6b7280;font-size:14px;margin-top:-8px;margin-bottom:8px;'>图片识别 · 翻译优化 · SEO/GEO · 生成HTML &nbsp;—&nbsp; 全程由<b>通义千问</b>处理</p>", unsafe_allow_html=True)
 st.divider()
 
 # ── API helpers ───────────────────────────────────────────────────────────────
-def get_gemini_model():
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    return genai.GenerativeModel("gemini-1.5-flash")
-
 def get_qianwen_client():
     return OpenAI(
         api_key=st.secrets["QIANWEN_API_KEY"],
@@ -121,22 +115,32 @@ def get_qianwen_client():
 def clean_json(text):
     return re.sub(r"```json|```", "", text).strip()
 
-def identify_image_gemini(img_file, page_name, brand_name, lang_key):
-    model = get_gemini_model()
+def identify_image_qianwen(img_file, page_name, brand_name, lang_key):
+    client = get_qianwen_client()
     img_file.seek(0)
-    pil_img = Image.open(img_file)
+    b64 = base64.standard_b64encode(img_file.read()).decode("utf-8")
     img_file.seek(0)
-    resp = model.generate_content([
-        f"""SEO expert. Analyze image. Respond ONLY with JSON (no markdown):
+    ext = img_file.name.lower().split(".")[-1]
+    media_type = {"png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+
+    resp = client.chat.completions.create(
+        model="qwen-vl-plus",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}},
+                {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown):
 {{
   "filename": "seo-filename-using-{page_name or 'image'}-prefix-max-5-words-lowercase-hyphens-no-extension",
   "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key}, under 125 chars, factual",
   "description": "one sentence factual description of image content"
 }}
-Brand: {brand_name or 'N/A'}. Do NOT exaggerate.""",
-        pil_img
-    ])
-    return clean_json(resp.text)
+Brand: {brand_name or 'N/A'}. Do NOT exaggerate."""}
+            ]
+        }],
+        max_tokens=300
+    )
+    return clean_json(resp.choices[0].message.content)
 
 def call_qianwen(prompt, max_tokens=4000):
     client = get_qianwen_client()
@@ -203,7 +207,7 @@ if image_files:
             st.image(f, use_container_width=True)
             st.caption(f.name)
 
-st.markdown('<div class="info-tip">📷 图片由 <b>Gemini</b> 识别内容，自动生成SEO文件名和alt文字。文字翻译和优化由 <b>通义千问</b> 处理。</div>', unsafe_allow_html=True)
+st.markdown('<div class="info-tip">📷 图片由 <b>通义千问视觉模型（qwen-vl-plus）</b> 识别内容，自动生成SEO文件名和alt文字。文字翻译和优化由 <b>通义千问（qwen-plus）</b> 处理。</div>', unsafe_allow_html=True)
 
 # ── RUN ───────────────────────────────────────────────────────────────────────
 st.markdown("")
@@ -226,10 +230,10 @@ if run_btn:
     # Image identification
     image_results = []
     if image_files:
-        log(f"Gemini 识别图片中（共 {len(image_files)} 张）...")
+        log(f"通义千问 识别图片中（共 {len(image_files)} 张）...")
         for i, img_file in enumerate(image_files):
             try:
-                raw = identify_image_gemini(img_file, page_name, brand_name, lang_key)
+                raw = identify_image_qianwen(img_file, page_name, brand_name, lang_key)
                 parsed = json.loads(raw)
                 image_results.append({
                     "original_name": img_file.name,
