@@ -106,6 +106,136 @@ if not check_password():
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## ⚡ 内容优化流水线")
 st.markdown("<p style='color:#6b7280;font-size:14px;margin-top:-8px;margin-bottom:8px;'>图片识别 · 翻译优化 · SEO/GEO · 生成HTML &nbsp;—&nbsp; 全程由<b>通义千问</b>处理</p>", unsafe_allow_html=True)
+
+# ── Mode switcher ─────────────────────────────────────────────────────────────
+mode = st.radio("选择模式", ["⚡ 完整流程（图片+文字→HTML）", "🖼️ 仅图片处理（重命名+转WebP）"],
+    horizontal=True, label_visibility="collapsed")
+st.divider()
+
+# ════════════════════════════════════════════════════════════════════════════════
+# IMAGE-ONLY MODE
+# ════════════════════════════════════════════════════════════════════════════════
+if mode == "🖼️ 仅图片处理（重命名+转WebP）":
+
+    st.markdown("### 🖼️ 图片处理")
+    st.markdown("<p style='color:#6b7280;font-size:13px;margin-top:-8px;'>上传图片 → AI识别内容 → 自动重命名 → 转WebP → 下载</p>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        img_page_name = st.text_input("页面/产品名称（用于命名前缀）", placeholder="e.g. container-home")
+    with col2:
+        img_brand = st.text_input("品牌名称", placeholder="e.g. Wellucky", key="img_brand")
+    img_lang = st.selectbox("Alt文字语言", ["英文 English", "西班牙语 Spanish", "德语 German"], key="img_lang")
+    img_lang_key = {"英文 English": "en", "西班牙语 Spanish": "es", "德语 German": "de"}[img_lang]
+    img_quality = st.slider("WebP压缩质量", 60, 100, 85, help="85为推荐值，肉眼基本无差别，文件更小")
+
+    img_files = st.file_uploader("上传图片（可多选）",
+        type=["jpg", "jpeg", "png", "webp", "gif"],
+        accept_multiple_files=True, key="img_only_files")
+
+    if img_files:
+        cols = st.columns(min(len(img_files), 5))
+        for i, f in enumerate(img_files):
+            with cols[i % 5]:
+                st.image(f, use_container_width=True)
+                st.caption(f.name)
+
+    use_ai = st.checkbox("使用AI识别内容并命名（消耗API）", value=True,
+        help="关闭后仅转换格式，文件名使用「前缀-序号」格式")
+
+    process_btn = st.button("🚀 开始处理图片", use_container_width=True, type="primary")
+
+    if process_btn and img_files:
+        progress = st.progress(0)
+        log_area = st.empty()
+        logs = []
+
+        def log_img(msg):
+            logs.append(msg)
+            log_area.markdown("  \n".join(f"<small style='color:#6b7280'>• {l}</small>" for l in logs[-5:]),
+                              unsafe_allow_html=True)
+
+        processed = []  # {name, webp_bytes, alt}
+
+        for i, img_file in enumerate(img_files):
+            log_img(f"处理第 {i+1}/{len(img_files)} 张: {img_file.name}")
+
+            # Convert to WebP
+            img_file.seek(0)
+            pil_img = Image.open(img_file).convert("RGB")
+            webp_buf = io.BytesIO()
+            pil_img.save(webp_buf, "WEBP", quality=img_quality)
+            webp_bytes = webp_buf.getvalue()
+
+            # Naming
+            if use_ai:
+                try:
+                    img_file.seek(0)
+                    raw = identify_image_qianwen(img_file, img_page_name, img_brand, img_lang_key)
+                    parsed = json.loads(raw)
+                    new_name = parsed.get("filename", f"{img_page_name or 'image'}-{i+1}") + ".webp"
+                    alt = parsed.get("alt", "")
+                    log_img(f"✓ AI命名: {new_name}")
+                except Exception as e:
+                    new_name = f"{img_page_name or 'image'}-{i+1}.webp"
+                    alt = ""
+                    log_img(f"⚠ AI命名失败，使用默认: {new_name}")
+            else:
+                new_name = f"{img_page_name or 'image'}-{i+1}.webp"
+                alt = ""
+                log_img(f"✓ 命名: {new_name}")
+
+            processed.append({"name": new_name, "bytes": webp_bytes, "alt": alt, "original": img_file.name})
+            progress.progress(int((i+1) / len(img_files) * 100))
+
+        log_img("✅ 全部处理完成！")
+        st.session_state["img_processed"] = processed
+
+    # ── Image results ──────────────────────────────────────────────────────────
+    if "img_processed" in st.session_state:
+        processed = st.session_state["img_processed"]
+        st.success(f"✅ 已处理 {len(processed)} 张图片")
+        st.divider()
+
+        # Build ZIP for bulk download
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in processed:
+                zf.writestr(p["name"], p["bytes"])
+        zip_buf.seek(0)
+
+        st.download_button(
+            "📦 打包下载全部（ZIP）",
+            data=zip_buf.getvalue(),
+            file_name=f"{img_page_name or 'images'}-webp.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+
+        st.markdown("**或单张下载：**")
+        st.markdown("")
+
+        for p in processed:
+            c1, c2, c3, c4 = st.columns([1, 2, 3, 1.5])
+            with c1:
+                st.image(p["bytes"], width=70)
+            with c2:
+                st.markdown(f"`{p['name']}`")
+                st.caption(f"原文件: {p['original']}")
+            with c3:
+                if p["alt"]:
+                    st.caption(f"Alt: {p['alt']}")
+            with c4:
+                st.download_button(
+                    "⬇ 下载",
+                    data=p["bytes"],
+                    file_name=p["name"],
+                    mime="image/webp",
+                    key=f"dl_{p['name']}"
+                )
+
+    st.stop()  # Don't render the full pipeline below
+
 st.divider()
 
 # ── API helpers ───────────────────────────────────────────────────────────────
@@ -413,10 +543,40 @@ if "html_output" in st.session_state:
 
     with tab3:
         if image_results:
+            # ── Build ZIP in memory ───────────────────────────────────────────
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for img in image_results:
+                    img["file"].seek(0)
+                    try:
+                        pil_img = Image.open(img["file"])
+                        webp_buf = io.BytesIO()
+                        pil_img.convert("RGB").save(webp_buf, format="WEBP", quality=85)
+                        zf.writestr(img["new_name"], webp_buf.getvalue())
+                    except Exception:
+                        img["file"].seek(0)
+                        zf.writestr(img["new_name"], img["file"].read())
+                    img["file"].seek(0)
+            zip_buffer.seek(0)
+
+            # ── Top actions row ───────────────────────────────────────────────
             st.caption("上传图片到网站后台后，填入链接，点击「更新HTML」")
+            ca, cb = st.columns([1, 4])
+            with ca:
+                st.download_button(
+                    "📦 一键下载全部（ZIP）",
+                    data=zip_buffer,
+                    file_name="images.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+
+            st.markdown("---")
+
+            # ── Per-image rows ────────────────────────────────────────────────
             updated_html = html_output
             for i, img in enumerate(image_results):
-                c1, c2, c3 = st.columns([1, 2, 3])
+                c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
                 with c1:
                     img["file"].seek(0)
                     st.image(img["file"], width=70)
@@ -425,10 +585,39 @@ if "html_output" in st.session_state:
                     st.caption(f"文件名: {img['new_name']}")
                     st.caption(f"Alt: {img['alt']}")
                 with c3:
+                    # Single image download as WebP
+                    img["file"].seek(0)
+                    try:
+                        pil_img = Image.open(img["file"])
+                        single_buf = io.BytesIO()
+                        pil_img.convert("RGB").save(single_buf, format="WEBP", quality=85)
+                        single_buf.seek(0)
+                        st.download_button(
+                            f"⬇ 下载",
+                            data=single_buf,
+                            file_name=img["new_name"],
+                            mime="image/webp",
+                            key=f"dl_{i}",
+                            use_container_width=True
+                        )
+                    except Exception:
+                        img["file"].seek(0)
+                        st.download_button(
+                            f"⬇ 下载",
+                            data=img["file"].read(),
+                            file_name=img["new_name"],
+                            mime="image/webp",
+                            key=f"dl_{i}",
+                            use_container_width=True
+                        )
+                    img["file"].seek(0)
+                with c4:
                     url = st.text_input("图片URL", key=f"url_{i}",
                         placeholder="https://yoursite.com/images/...")
                     if url:
                         updated_html = updated_html.replace(img["placeholder"], url)
+
+            st.markdown("---")
             if st.button("🔄 更新图片链接"):
                 st.session_state["html_output"] = updated_html
                 st.success("✓ 已更新，切换到「HTML代码」查看")
