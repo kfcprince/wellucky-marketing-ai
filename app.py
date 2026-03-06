@@ -418,6 +418,19 @@ if run_btn:
         if opt_geo else ""
     )
 
+    seo_instr = ""
+    if opt_seo and keywords:
+        primary_kw = keywords[0]
+        secondary_kws = ', '.join(keywords[1:]) if len(keywords) > 1 else ""
+        seo_instr = f"""SEO keyword rules (MUST follow strictly):
+   - Primary keyword: "{primary_kw}" — MUST appear in the very first sentence of the first paragraph
+   - Primary keyword MUST also appear in the H1 title (or very close to it)
+   - Use "{primary_kw}" naturally 3-5 times throughout the full content
+   - Secondary keywords ({secondary_kws or 'none'}): use each at least once, naturally woven into the text
+   - Do NOT keyword-stuff; keep the writing natural and readable"""
+    elif opt_seo:
+        seo_instr = "Write with SEO best practices: clear structure, descriptive headings, natural language."
+
     prompt = f"""You are an expert SEO/GEO content optimizer and HTML developer.
 
 TASK: Transform the Chinese content below into optimized HTML for a {page_type_key} page.
@@ -429,7 +442,7 @@ CRITICAL RULES:
 REQUIREMENTS:
 1. Translate to {'English' if lang_key == 'en' else lang_key}
 2. {"Semantic HTML: one H1, H2, H3, p, ul, ol, strong tags" if opt_structure else "Basic paragraph structure"}
-3. {"SEO: naturally include keywords: " + ', '.join(keywords) if opt_seo and keywords else ""}
+3. {seo_instr}
 4. {geo_instr}
 5. {schema_instr}
 6. {faq_instr}
