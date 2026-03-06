@@ -1,277 +1,532 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import google.generativeai as genai
-import dashscope 
-from dashscope import ImageSynthesis, MultiModalConversation, Generation
-from zhipuai import ZhipuAI
-from PIL import Image, ImageDraw, ImageFont
-import io, base64, re, os, requests, uuid, zipfile, time
+import anthropic
+import base64
+import json
+import re
+from PIL import Image
+import io
 
-# ==========================================
-# 0. 全局配置
-# ==========================================
-st.set_page_config(page_title="Wellucky & VastLog 运营中台 V38.0 (精简版)", layout="wide", page_icon="🦁")
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="内容优化流水线",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-if 'results_tab1' not in st.session_state: st.session_state.results_tab1 = []
-if 'generated_bg' not in st.session_state: st.session_state.generated_bg = None
+# ── Password gate ─────────────────────────────────────────────────────────────
+def check_password():
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
 
-def get_secret_safe(key_name, default=""):
-    try: return st.secrets.get(key_name, default)
-    except: return default
+    if st.session_state.authenticated:
+        return True
 
-GOOGLE_API_KEY = get_secret_safe("GOOGLE_API_KEY")
-ALI_API_KEY = get_secret_safe("ALI_API_KEY")
-ZHIPU_API_KEY = get_secret_safe("ZHIPU_API_KEY")
+    st.markdown("## 🔐 请输入访问密码")
+    pwd = st.text_input("密码", type="password")
+    if st.button("进入"):
+        correct = st.secrets.get("APP_PASSWORD", "admin123")
+        if pwd == correct:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("密码错误")
+    return False
 
-BIZ_CONFIG = {
-    "logistics": {
-        "name": "VastLog", "website": "www.vastlog.com", "color": "#FF9900", 
-        "type": "LogisticsService", "keywords": ["logistics", "shipping", "freight", "cargo", "DDP"],
-        "action": "Get a Free Shipping Quote"
-    },
-    "house": {
-        "name": "Wellucky", "website": "www.welluckyhouse.com", "color": "#0066CC", 
-        "type": "Product", "keywords": ["container house", "modular home", "prefab", "steel structure"],
-        "action": "Customize Your Container Home"
-    }
+if not check_password():
+    st.stop()
+
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] { font-family: 'Sora', sans-serif; }
+
+.main { background: #0c0c0f; }
+.block-container { max-width: 960px; padding-top: 2rem; }
+
+h1 { font-size: 2rem !important; font-weight: 700 !important; }
+h2 { font-size: 1.2rem !important; font-weight: 600 !important; }
+h3 { font-size: 1rem !important; }
+
+.badge {
+    display: inline-block;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: #4fc8a0;
+    border: 1px solid #4fc8a0;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
 }
 
-# ==========================================
-# 1. 核心工具 (外科手术级清洗 + 图片压缩)
-# ==========================================
-def get_font(size):
-    try: return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
-    except: return ImageFont.load_default()
+.step-card {
+    background: #14141a;
+    border: 1px solid #2a2a38;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+}
 
-def resize_image_for_api(img, max_size=1500):
-    if img.mode != 'RGB': img = img.convert('RGB')
-    if img.width > max_size or img.height > max_size:
-        img.thumbnail((max_size, max_size))
-    return img
+.step-header {
+    font-size: 15px;
+    font-weight: 600;
+    color: #e8e8f0;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 
-def convert_to_webp(image):
-    buf = io.BytesIO()
-    img = resize_image_for_api(image, 1500)
-    img.save(buf, format='WEBP', quality=85)
-    return buf.getvalue()
+.step-num {
+    background: #7c6af7;
+    color: white;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+}
 
-def pil_to_base64_safe(img):
-    buf = io.BytesIO()
-    img = resize_image_for_api(img, 1500)
-    img.save(buf, format="JPEG", quality=85)
-    return base64.b64encode(buf.getvalue()).decode('utf-8')
+.info-box {
+    background: rgba(124,106,247,0.08);
+    border: 1px solid rgba(124,106,247,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #8888a8;
+    margin-top: 8px;
+}
 
-# 外科手术级文件名清洗逻辑
-def surgical_clean_filename(raw_text, brand):
-    text = raw_text.lower().strip()
-    garbage_prefixes = ['filename:', 'file name:', 'output:', 'name:', 'title:', 'seo filename:']
-    for p in garbage_prefixes: text = text.replace(p, '')
-    text = re.sub(r'\.(jpg|jpeg|png|webp|gif|bmp)$', '', text)
-    text = text.replace(brand.lower(), '')
-    stop_words = ['image', 'photo', 'picture', 'view', 'of', 'the', 'a', 'an', 'angle']
-    for word in stop_words: text = re.sub(fr'\b{word}\b', '', text)
-    text = re.sub(r'[^a-z0-9]', ' ', text)
-    words = text.split()
-    clean_text = "-".join(words)
-    if clean_text:
-        final_name = f"{brand.lower()}-{clean_text}"
-    else:
-        final_name = f"{brand.lower()}-product"
-    return final_name
+.output-code {
+    background: #14141a;
+    border: 1px solid #2a2a38;
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #e8e8f0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 500px;
+    overflow-y: auto;
+}
 
-# ==========================================
-# 2. AI 调用逻辑
-# ==========================================
-def run_ai_vision(engine, img, prompt, key, model_name):
-    if not key: return "Error: 缺少 API Key"
-    try:
-        processed_img = resize_image_for_api(img)
-        if engine == "Google Gemini":
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content([prompt, processed_img])
-            return response.text
-        elif engine == "智谱清言":
-            client = ZhipuAI(api_key=key)
-            vision_model = "glm-4v"
-            b64_img = pil_to_base64_safe(processed_img)
-            response = client.chat.completions.create(
-                model=vision_model,
-                messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}]}]
-            )
-            return response.choices[0].message.content
-        elif engine == "阿里通义":
-            dashscope.api_key = key
-            tmp_path = f"temp_{uuid.uuid4()}.jpg"
-            processed_img.save(tmp_path, format="JPEG")
+.stButton > button {
+    background: #7c6af7 !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-family: 'Sora', sans-serif !important;
+    font-weight: 600 !important;
+    padding: 0.5rem 1.5rem !important;
+    transition: all 0.2s !important;
+}
+
+.stButton > button:hover {
+    background: #9080ff !important;
+    transform: translateY(-1px) !important;
+}
+
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stSelectbox > div > div > div {
+    background: #1c1c26 !important;
+    border: 1px solid #2a2a38 !important;
+    color: #e8e8f0 !important;
+    border-radius: 8px !important;
+}
+
+.stProgress > div > div { background: linear-gradient(90deg, #7c6af7, #4fc8a0) !important; }
+
+.img-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.img-card {
+    background: #1c1c26;
+    border: 1px solid #2a2a38;
+    border-radius: 8px;
+    padding: 8px;
+    width: 150px;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: #8888a8;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown('<div class="badge">CONTENT PIPELINE v1.0</div>', unsafe_allow_html=True)
+st.markdown("# 内容优化 <span style='color:#7c6af7'>流水线</span>", unsafe_allow_html=True)
+st.markdown("<p style='color:#8888a8;font-size:14px;margin-top:-8px;'>图片处理 · 翻译 · SEO/GEO优化 · 生成可直接复制的HTML代码</p>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ── Claude client ─────────────────────────────────────────────────────────────
+@st.cache_resource
+def get_client():
+    return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def image_to_base64(uploaded_file):
+    bytes_data = uploaded_file.read()
+    uploaded_file.seek(0)
+    return base64.standard_b64encode(bytes_data).decode("utf-8")
+
+def get_media_type(filename):
+    ext = filename.lower().split(".")[-1]
+    return {"png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+
+def clean_json(text):
+    text = re.sub(r"```json|```", "", text).strip()
+    return text
+
+# ── STEP 1: Basic settings ────────────────────────────────────────────────────
+st.markdown('<div class="step-header"><span class="step-num">1</span> 基本设置</div>', unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    page_type = st.selectbox("页面类型", ["产品页 (Product Page)", "文章页 (Article Page)"])
+    page_type_key = "product" if "产品" in page_type else "article"
+with col2:
+    target_lang = st.selectbox("目标语言", ["英文 English", "西班牙语 Spanish", "德语 German"])
+    lang_map = {"英文 English": "en", "西班牙语 Spanish": "es", "德语 German": "de"}
+    lang_key = lang_map[target_lang]
+
+col3, col4 = st.columns(2)
+with col3:
+    page_name = st.text_input("页面/产品名称（用于图片重命名和SEO）", placeholder="e.g. 20ft-shipping-container-home")
+with col4:
+    brand_name = st.text_input("品牌名称", placeholder="e.g. ContainerLife")
+
+keywords_raw = st.text_input("目标关键词（用逗号分隔）", placeholder="e.g. container home, shipping container house, modular home")
+keywords = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+
+st.markdown("---")
+
+# ── STEP 2: Text content ──────────────────────────────────────────────────────
+st.markdown('<div class="step-header"><span class="step-num">2</span> 文字内容</div>', unsafe_allow_html=True)
+
+text_content = st.text_area(
+    "直接粘贴内容（中文原文）",
+    height=200,
+    placeholder="将业务员提供的文字内容粘贴到这里...\n\n支持标题、段落、产品参数等各种格式"
+)
+
+doc_file = st.file_uploader(
+    "或上传文件（Word / Excel）",
+    type=["docx", "xlsx", "xls", "doc", "txt"],
+    help="上传后文字内容将从文件中提取"
+)
+
+if doc_file:
+    st.success(f"✓ 已上传: {doc_file.name}")
+    if doc_file.name.endswith(".txt"):
+        text_content = doc_file.read().decode("utf-8", errors="ignore")
+        st.info("已读取文本文件内容")
+
+st.markdown("**优化选项**")
+col_a, col_b, col_c, col_d, col_e = st.columns(5)
+with col_a: opt_seo = st.checkbox("SEO优化", value=True)
+with col_b: opt_geo = st.checkbox("GEO/AIO优化", value=True)
+with col_c: opt_structure = st.checkbox("语义化结构", value=True)
+with col_d: opt_faq = st.checkbox("生成FAQ", value=True)
+with col_e: opt_schema = st.checkbox("Schema Microdata", value=False)
+
+st.markdown("---")
+
+# ── STEP 3: Images ────────────────────────────────────────────────────────────
+st.markdown('<div class="step-header"><span class="step-num">3</span> 图片素材（AI自动识别内容 + 生成alt文字）</div>', unsafe_allow_html=True)
+
+image_files = st.file_uploader(
+    "上传图片（可多选）",
+    type=["jpg", "jpeg", "png", "webp", "gif"],
+    accept_multiple_files=True
+)
+
+if image_files:
+    cols = st.columns(min(len(image_files), 5))
+    for i, img_file in enumerate(image_files):
+        with cols[i % 5]:
+            st.image(img_file, use_container_width=True)
+            st.caption(img_file.name)
+
+st.markdown('<div class="info-box">图片处理：①AI识别图片内容 ②生成SEO友好文件名 ③生成alt描述。处理完后图片占位符会显示在输出HTML中，你填入真实URL后点"更新链接"即可。</div>', unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ── RUN ───────────────────────────────────────────────────────────────────────
+run_btn = st.button("⚡ 开始处理", use_container_width=True)
+
+if run_btn:
+    if not text_content and not doc_file:
+        st.error("请先输入文字内容或上传文件")
+        st.stop()
+
+    if not page_name:
+        st.warning("建议填写页面名称，用于图片重命名")
+
+    client = get_client()
+    progress = st.progress(0)
+    status = st.empty()
+    log_area = st.empty()
+    logs = []
+
+    def log(msg):
+        logs.append(msg)
+        log_area.markdown("\n\n".join(f"`{l}`" for l in logs[-5:]))
+
+    # ── Process images ────────────────────────────────────────────────────────
+    image_results = []
+
+    if image_files:
+        log(f"⏳ 正在识别 {len(image_files)} 张图片...")
+        progress.progress(10)
+
+        for i, img_file in enumerate(image_files):
+            log(f"⏳ 识别图片 {i+1}/{len(image_files)}: {img_file.name}")
             try:
-                msgs = [{"role": "user", "content": [{"image": f"file://{os.path.abspath(tmp_path)}"}, {"text": prompt}]}]
-                res = MultiModalConversation.call(model=model_name, messages=msgs)
-                if isinstance(res.output.choices[0].message.content, list):
-                    return res.output.choices[0].message.content[0]['text']
-                return res.output.choices[0].message.content
-            finally:
-                if os.path.exists(tmp_path): os.remove(tmp_path)
-        return "Error: 未知引擎"
-    except Exception as e: return f"Error: {str(e)}"
+                b64 = image_to_base64(img_file)
+                media_type = get_media_type(img_file.name)
 
-def run_ai_vision_with_retry(engine, img, prompt, key, model_name, max_retries=2):
-    for attempt in range(max_retries):
-        try:
-            res = run_ai_vision(engine, img, prompt, key, model_name)
-            if res and not res.startswith("Error"): return res
-        except: time.sleep(1)
-    return f"item-{uuid.uuid4().hex[:6]}"
+                resp = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1000,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                            {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown):
+{{
+  "filename": "seo-friendly-filename-no-extension-using-{page_name or 'image'}-as-prefix-max-5-words-lowercase-hyphens",
+  "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key} for SEO, under 125 chars",
+  "description": "one sentence about what this image shows"
+}}
+Brand: {brand_name or 'N/A'}. Page topic: {page_name or 'product'}.
+IMPORTANT: Keep original facts only, do not exaggerate."""}
+                        ]
+                    }]
+                )
 
-# ==========================================
-# 3. 侧边栏
-# ==========================================
-with st.sidebar:
-    st.title("⚙️ 配置 V38.0")
-    st.subheader("1. 业务模式")
-    biz_choice = st.radio("Business", ("🚢 VastLog (物流)", "🏠 Wellucky (房屋)"), label_visibility="collapsed")
-    cbiz = "logistics" if "VastLog" in biz_choice else "house"
-    cinfo = BIZ_CONFIG[cbiz]
-    
-    st.divider()
-    st.subheader("2. AI 引擎")
-    engine_choice = st.radio("Vendor", ("Google Gemini", "智谱清言", "阿里通义"))
-    if engine_choice == "Google Gemini":
-        model_options = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
-        sel_model = st.selectbox("模型版本", model_options, index=0)
-        api_key = GOOGLE_API_KEY
-    elif engine_choice == "智谱清言":
-        model_options = ["glm-4v", "glm-4v-flash"]
-        sel_model = st.selectbox("模型版本", model_options, index=0)
-        api_key = ZHIPU_API_KEY
-    else:
-        model_options = ["qwen-vl-max", "qwen-vl-plus"]
-        sel_model = st.selectbox("模型版本", model_options, index=0)
-        api_key = ALI_API_KEY
+                raw = resp.content[0].text
+                raw = clean_json(raw)
+                parsed = json.loads(raw)
 
-# ==========================================
-# 4. 主界面 (只保留两个 Tab)
-# ==========================================
-st.title(f"🦁 {cinfo['name']} 数字化运营台")
-st.caption(f"Engine: {engine_choice} | Mode: Lite Version")
+                image_results.append({
+                    "original_name": img_file.name,
+                    "new_name": parsed.get("filename", f"{page_name}-image-{i+1}") + ".webp",
+                    "alt": parsed.get("alt", f"{page_name} image {i+1}"),
+                    "description": parsed.get("description", ""),
+                    "placeholder": f"IMAGE_PLACEHOLDER_{i+1}",
+                    "file": img_file
+                })
+                log(f"✓ 图片 {i+1} 识别完成: {parsed.get('filename', '')}")
 
-# 【修改点】这里只定义了两个 Tab
-tab1, tab2 = st.tabs(["✍️ 智能文案", "🎨 封面工厂"])
+            except Exception as e:
+                image_results.append({
+                    "original_name": img_file.name,
+                    "new_name": f"{page_name or 'image'}-{i+1}.webp",
+                    "alt": f"{page_name or 'image'} {i+1}",
+                    "description": "",
+                    "placeholder": f"IMAGE_PLACEHOLDER_{i+1}",
+                    "file": img_file
+                })
+                log(f"⚠ 图片 {i+1} 识别失败，使用默认命名")
 
-# --- Tab 1: 智能文案 ---
-with tab1:
-    c1, c2 = st.columns([1, 1])
-    files_t1 = c1.file_uploader("📂 上传图片", accept_multiple_files=True, key="t1")
-    with c2:
-        draft = st.text_area("补充信息", height=100)
-        b1, b2 = st.columns(2)
-        btn_name = b1.button("🖼️ 仅识图起名", use_container_width=True)
-        btn_full = b2.button("🚀 全套处理", type="primary", use_container_width=True)
+            progress.progress(10 + int((i+1) / len(image_files) * 30))
 
-    if (btn_name or btn_full) and files_t1:
-        st.session_state.results_tab1 = []
-        kw_str = ", ".join(cinfo['keywords'][:4])
-        
-        prompt_seo = f"""
-        Role: SEO Expert.
-        Task: Describe the visual content of this image in 3-5 keywords.
-        Keywords to use: {kw_str}.
-        [STRICT FORMAT]: keyword1-keyword2-visualdetail
-        [FORBIDDEN]: DO NOT output "Filename", "Image of", "{cinfo['name']}", "Angle", ".jpg".
-        """
-        
-        prompt_copy = f"Write a Facebook post for {cinfo['name']}. Context: {draft}."
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        name_counter = {}
-        
-        for i, f in enumerate(files_t1):
-            status_text.info(f"⏳ 处理中 ({i+1}/{len(files_t1)}): {f.name}")
-            img = Image.open(f)
-            
-            raw_name = run_ai_vision_with_retry(engine_choice, img, prompt_seo, api_key, sel_model)
-            clean_name = surgical_clean_filename(raw_name, cinfo['name'])
-            
-            if clean_name in name_counter:
-                name_counter[clean_name] += 1
-                final_name = f"{clean_name}-{name_counter[clean_name]:02d}"
-            else:
-                name_counter[clean_name] = 1
-                final_name = clean_name
+        log(f"✓ 全部图片识别完成")
 
-            copy_txt = ""
-            if btn_full:
-                copy_txt = run_ai_vision(engine_choice, img, prompt_copy, api_key, sel_model)
-            
-            st.session_state.results_tab1.append({"img": img, "name": f"{final_name}.webp", "text": copy_txt, "data": convert_to_webp(img)})
-            progress_bar.progress((i+1)/len(files_t1))
-        
-        status_text.success("✅ 完成！")
+    # ── Text optimization ─────────────────────────────────────────────────────
+    progress.progress(45)
+    log("⏳ 正在翻译并进行SEO/GEO优化...")
 
-    if st.session_state.results_tab1:
-        st.divider()
-        c_down, c_clear = st.columns([1, 1])
-        with c_down:
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w") as zf:
-                for res in st.session_state.results_tab1:
-                    zf.writestr(res['name'], res['data'])
-            st.download_button(f"📦 批量下载 ZIP", zip_buf.getvalue(), "images.zip", "application/zip", use_container_width=True, type="primary")
-        with c_clear:
-            if st.button("🗑️ 清空列表", use_container_width=True):
-                st.session_state.results_tab1 = []
+    img_descriptions = "\n".join([
+        f"Image {i+1}: filename=\"{r['new_name']}\", alt=\"{r['alt']}\", description=\"{r['description']}\""
+        for i, r in enumerate(image_results)
+    ]) or "No images"
+
+    schema_instruction = (
+        f"Add HTML Microdata schema attributes (itemscope, itemtype, itemprop) inline for {'Product' if page_type_key == 'product' else 'Article'} schema. Do NOT use JSON-LD."
+        if opt_schema else "Do NOT add any Schema markup."
+    )
+
+    faq_instruction = (
+        "Add a FAQ section at the end with 3-5 relevant Q&As. Use <div class=\"faq-section\"><h2>Frequently Asked Questions</h2> structure. Target long-tail keywords."
+        if opt_faq else ""
+    )
+
+    geo_instruction = (
+        "GEO/AIO optimization: Write in clear, authoritative, direct-answer style. Include concise definitions and facts. Structure so key facts appear in first 1-2 sentences of paragraphs."
+        if opt_geo else ""
+    )
+
+    prompt = f"""You are an expert SEO/GEO content optimizer and HTML developer.
+
+TASK: Transform the Chinese content below into optimized HTML for a {page_type_key} page.
+
+CRITICAL RULES:
+- Preserve ALL original information — do NOT remove, fabricate, or exaggerate facts
+- Only improve wording, flow, and clarity
+- Keep the meaning 100% faithful to the original
+
+REQUIREMENTS:
+1. Translate to {'English' if lang_key == 'en' else lang_key}
+2. {f"Use semantic HTML: H1 (one only), H2, H3, p, ul, ol, strong tags" if opt_structure else "Use basic paragraph structure"}
+3. {f"SEO: Naturally include keywords: {', '.join(keywords) or page_name}. Use in headings and naturally throughout." if opt_seo else ""}
+4. {geo_instruction}
+5. {schema_instruction}
+6. {faq_instruction}
+7. Insert image placeholders as [[IMAGE_N_URL]] at logical positions. Format:
+   <figure>
+     <img src="[[IMAGE_N_URL]]" alt="ALT_TEXT" loading="lazy" width="800" height="600">
+     <figcaption>CAPTION</figcaption>
+   </figure>
+8. Output ONLY inner HTML content (no <html>, <head>, <body> tags)
+9. Brand: {brand_name or 'N/A'}
+
+IMAGES ({len(image_results)} total):
+{img_descriptions}
+
+ORIGINAL CONTENT:
+{text_content}"""
+
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        html_output = resp.content[0].text
+        html_output = re.sub(r"```html|```", "", html_output).strip()
+
+        # Replace [[IMAGE_N_URL]] with placeholders
+        for r in image_results:
+            n = r["placeholder"].replace("IMAGE_PLACEHOLDER_", "")
+            html_output = html_output.replace(f"[[IMAGE_{n}_URL]]", r["placeholder"])
+
+        progress.progress(80)
+        log("✓ 内容优化完成")
+
+        # ── SEO metadata ──────────────────────────────────────────────────────
+        log("⏳ 正在生成SEO摘要...")
+
+        seo_resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{
+                "role": "user",
+                "content": f"""Generate SEO metadata. Respond ONLY with JSON (no markdown):
+{{
+  "title": "SEO title under 60 chars",
+  "meta_description": "meta description under 155 chars",
+  "url_slug": "seo-friendly-url-slug",
+  "og_title": "Open Graph title",
+  "og_description": "OG description under 200 chars",
+  "primary_keyword": "main keyword",
+  "secondary_keywords": ["kw1", "kw2", "kw3"],
+  "geo_summary": "1-2 sentence direct answer for AI search engines"
+}}
+
+HTML: {html_output[:2000]}"""
+            }]
+        )
+
+        seo_raw = clean_json(seo_resp.content[0].text)
+        seo = json.loads(seo_raw)
+
+        progress.progress(100)
+        log("✓ 全部完成！")
+        status.success("✅ 处理完成！")
+
+        # ── Store results ──────────────────────────────────────────────────────
+        st.session_state["html_output"] = html_output
+        st.session_state["image_results"] = image_results
+        st.session_state["seo"] = seo
+
+    except Exception as e:
+        st.error(f"处理出错: {e}")
+        st.stop()
+
+# ── OUTPUT ────────────────────────────────────────────────────────────────────
+if "html_output" in st.session_state:
+    html_output = st.session_state["html_output"]
+    image_results = st.session_state["image_results"]
+    seo = st.session_state["seo"]
+
+    st.markdown("---")
+    st.markdown("## ✅ 处理完成 — 输出结果")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📄 HTML代码", "🖼️ 图片对照表", "🔍 SEO摘要", "🔗 URL & Meta"])
+
+    with tab1:
+        st.markdown("**复制以下代码，粘贴到CMS源代码编辑框**")
+        st.code(html_output, language="html")
+        st.download_button("⬇ 下载HTML文件", html_output, file_name=f"{seo.get('url_slug', 'output')}.html", mime="text/html")
+
+    with tab2:
+        if image_results:
+            st.markdown("**上传图片到网站后台后，将链接填入对应栏，然后点击「更新HTML」**")
+
+            updated_html = html_output
+            for i, img in enumerate(image_results):
+                col1, col2, col3 = st.columns([1, 2, 3])
+                with col1:
+                    img.get("file").seek(0)
+                    st.image(img["file"], width=80)
+                with col2:
+                    st.markdown(f"**{img['placeholder']}**")
+                    st.caption(f"建议文件名: `{img['new_name']}`")
+                    st.caption(f"Alt: {img['alt']}")
+                with col3:
+                    url = st.text_input(f"图片URL", key=f"url_{i}", placeholder="https://yoursite.com/images/...")
+                    if url:
+                        updated_html = updated_html.replace(img["placeholder"], url)
+
+            if st.button("🔄 更新HTML中的图片链接"):
+                st.session_state["html_output"] = updated_html
+                st.success("✓ 链接已更新，切换到「HTML代码」标签查看最新版本")
                 st.rerun()
-
-        st.divider()
-        for i, res in enumerate(st.session_state.results_tab1):
-            l, r = st.columns([1, 3])
-            l.image(res['img'], width=120)
-            with r:
-                ukey = f"{i}_{uuid.uuid4()}"
-                st.text_input("文件名", res['name'], key=f"n_{ukey}")
-                if res['text']: st.text_area("文案", res['text'], height=60, key=f"t_{ukey}")
-
-# --- Tab 2: 封面工厂 ---
-with tab2:
-    bg_col, txt_col = st.columns([1, 1])
-    with bg_col:
-        st.markdown("#### A. 背景")
-        mode = st.radio("来源", ["本地上传", "AI生图"], horizontal=True)
-        bg_img = None
-        if mode == "本地上传":
-            f = st.file_uploader("上传背景", key="t2_up")
-            if f: bg_img = Image.open(f).convert("RGBA")
         else:
-            p = st.text_input("画面描述", "container ship at sunset")
-            if st.button("生成背景"):
-                if not ALI_API_KEY: st.error("需配置 ALI_API_KEY")
-                else:
-                    dashscope.api_key = ALI_API_KEY
-                    rsp = ImageSynthesis.call(model=ImageSynthesis.Models.wanx_v1, prompt=p, n=1, size='1024*1024')
-                    if rsp.status_code==200:
-                        st.session_state.generated_bg = Image.open(io.BytesIO(requests.get(rsp.output.results[0].url).content)).convert("RGBA")
-            if st.session_state.generated_bg: bg_img = st.session_state.generated_bg
+            st.info("本次未上传图片")
 
-    with txt_col:
-        st.markdown("#### B. 文字")
-        with st.expander("标题 1", expanded=True):
-            t1 = st.text_input("Txt1", "Global Logistics"); s1 = st.number_input("Size1", 20,300,80); c1 = st.color_picker("Col1", "#FFF"); y1 = st.slider("Y1",0,1000,100)
-        with st.expander("标题 2"):
-            t2 = st.text_input("Txt2", "DDP Service"); s2 = st.number_input("Size2", 20,300,50); c2 = st.color_picker("Col2", cinfo['color']); y2 = st.slider("Y2",0,1000,250)
-        with st.expander("标题 3"):
-            t3 = st.text_input("Txt3", "Fast & Safe"); s3 = st.number_input("Size3", 20,300,30); c3 = st.color_picker("Col3", "#FF0"); y3 = st.slider("Y3",0,1000,350)
+    with tab3:
+        seo_meta = f"""<!-- SEO Meta Tags — 复制到页面 <head> 中 -->
 
-    if bg_img:
-        st.divider()
-        final = bg_img.copy(); draw = ImageDraw.Draw(final); W,H = final.size
-        def dr(t,s,c,y):
-            if not t: return
-            f = get_font(int(s))
-            try: w = draw.textlength(t, font=f)
-            except: w = draw.textbbox((0,0),t,font=f)[2]
-            x = (W-w)/2
-            draw.text((x+4,y+4),t,font=f,fill="black"); draw.text((x,y),t,font=f,fill=c)
-        dr(t1,s1,c1,y1); dr(t2,s2,c2,y2); dr(t3,s3,c3,y3)
-        st.image(final, use_container_width=True)
-        buf=io.BytesIO(); final.convert("RGB").save(buf,"JPEG"); st.download_button("下载封面", buf.getvalue(), "cover.jpg")
+<title>{seo.get('title', '')}</title>
+<meta name="description" content="{seo.get('meta_description', '')}">
+
+<!-- Open Graph -->
+<meta property="og:title" content="{seo.get('og_title', '')}">
+<meta property="og:description" content="{seo.get('og_description', '')}">
+<meta property="og:type" content="{'product' if page_type_key == 'product' else 'article'}">
+
+<!-- GEO/AIO摘要（可放在页面最顶部段落） -->
+<!-- {seo.get('geo_summary', '')} -->
+
+<!-- Keywords -->
+<!-- Primary: {seo.get('primary_keyword', '')} -->
+<!-- Secondary: {', '.join(seo.get('secondary_keywords', []))} -->"""
+
+        st.code(seo_meta, language="html")
+
+    with tab4:
+        st.markdown("**页面URL Slug（建议）**")
+        st.code(seo.get("url_slug", ""), language="text")
+
+        st.markdown("**Meta Description**")
+        st.info(seo.get("meta_description", ""))
+
+        st.markdown("**GEO/AIO摘要**（适合放在页面第一段，AI搜索引擎容易引用）")
+        st.success(seo.get("geo_summary", ""))
+
+        st.markdown("**主要关键词**")
+        st.code(seo.get("primary_keyword", ""), language="text")
+
+        if seo.get("secondary_keywords"):
+            st.markdown("**次要关键词**")
+            st.write(" · ".join(seo.get("secondary_keywords", [])))
