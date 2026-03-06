@@ -113,7 +113,7 @@ def get_qianwen_client():
 def get_qianwen_vl_client():
     return OpenAI(
         api_key=st.secrets["QIANWEN_API_KEY"],
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
     )
 
 def clean_json(text):
@@ -129,7 +129,7 @@ def identify_image_qianwen(img_file, page_name, brand_name, lang_key):
     b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
     img_file.seek(0)
     resp = get_qianwen_vl_client().chat.completions.create(
-        model="qwen-vl-plus",
+        model="qwen-vl-plus-latest",
         messages=[{
             "role": "user",
             "content": [
