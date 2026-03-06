@@ -103,6 +103,59 @@ def check_password():
 if not check_password():
     st.stop()
 
+# ── API helpers ───────────────────────────────────────────────────────────────
+def get_qianwen_client():
+    return OpenAI(
+        api_key=st.secrets["QIANWEN_API_KEY"],
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+
+def get_qianwen_vl_client():
+    return OpenAI(
+        api_key=st.secrets["QIANWEN_API_KEY"],
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    )
+
+def clean_json(text):
+    return re.sub(r"```json|```", "", text).strip()
+
+def identify_image_qianwen(img_file, page_name, brand_name, lang_key):
+    client = get_qianwen_vl_client()
+    img_file.seek(0)
+    pil_img = Image.open(img_file).convert("RGB")
+    pil_img.thumbnail((1024, 1024), Image.LANCZOS)
+    buf = io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=85)
+    b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+    img_file.seek(0)
+    resp = get_qianwen_vl_client().chat.completions.create(
+        model="qwen-vl-plus",
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown, no explanation):
+{{
+  "filename": "seo-filename-using-{page_name or 'image'}-prefix-max-5-words-lowercase-hyphens-no-extension",
+  "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key}, under 125 chars, factual description",
+  "description": "one sentence factual description of what this image shows"
+}}
+Brand: {brand_name or 'N/A'}. Keep it factual, do NOT exaggerate."""}
+            ]
+        }],
+        max_tokens=300
+    )
+    return clean_json(resp.choices[0].message.content)
+
+def call_qianwen(prompt, max_tokens=4000):
+    client = get_qianwen_client()
+    resp = client.chat.completions.create(
+        model="qwen-plus",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens
+    )
+    return resp.choices[0].message.content
+
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## ⚡ 内容优化流水线")
 st.markdown("<p style='color:#6b7280;font-size:14px;margin-top:-8px;margin-bottom:8px;'>图片识别 · 翻译优化 · SEO/GEO · 生成HTML &nbsp;—&nbsp; 全程由<b>通义千问</b>处理</p>", unsafe_allow_html=True)
@@ -237,64 +290,6 @@ if mode == "🖼️ 仅图片处理（重命名+转WebP）":
     st.stop()  # Don't render the full pipeline below
 
 st.divider()
-
-# ── API helpers ───────────────────────────────────────────────────────────────
-def get_qianwen_client():
-    return OpenAI(
-        api_key=st.secrets["QIANWEN_API_KEY"],
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
-
-def get_qianwen_vl_client():
-    # 视觉模型用国际接口更稳定
-    return OpenAI(
-        api_key=st.secrets["QIANWEN_API_KEY"],
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    )
-
-def clean_json(text):
-    return re.sub(r"```json|```", "", text).strip()
-
-def identify_image_qianwen(img_file, page_name, brand_name, lang_key):
-    client = get_qianwen_vl_client()
-
-    # 压缩图片再传，避免大图失败
-    img_file.seek(0)
-    pil_img = Image.open(img_file).convert("RGB")
-    # 限制最大边长1024px
-    pil_img.thumbnail((1024, 1024), Image.LANCZOS)
-    buf = io.BytesIO()
-    pil_img.save(buf, format="JPEG", quality=85)
-    b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
-    img_file.seek(0)
-
-    resp = client.chat.completions.create(
-        model="qwen-vl-plus",
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                {"type": "text", "text": f"""You are an SEO expert. Analyze this image and respond ONLY with JSON (no markdown, no explanation):
-{{
-  "filename": "seo-filename-using-{page_name or 'image'}-prefix-max-5-words-lowercase-hyphens-no-extension",
-  "alt": "descriptive alt text in {'English' if lang_key == 'en' else lang_key}, under 125 chars, factual description",
-  "description": "one sentence factual description of what this image shows"
-}}
-Brand: {brand_name or 'N/A'}. Keep it factual, do NOT exaggerate."""}
-            ]
-        }],
-        max_tokens=300
-    )
-    return clean_json(resp.choices[0].message.content)
-
-def call_qianwen(prompt, max_tokens=4000):
-    client = get_qianwen_client()
-    resp = client.chat.completions.create(
-        model="qwen-plus",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens
-    )
-    return resp.choices[0].message.content
 
 # ── STEP 1: Basic settings ────────────────────────────────────────────────────
 st.markdown('<div class="section-label">① 基本设置</div>', unsafe_allow_html=True)
