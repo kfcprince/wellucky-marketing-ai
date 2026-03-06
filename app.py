@@ -179,7 +179,7 @@ if mode == "🖼️ 仅图片处理（重命名+转WebP）":
                 except Exception as e:
                     new_name = f"{img_page_name or 'image'}-{i+1}.webp"
                     alt = ""
-                    log_img(f"⚠ AI命名失败，使用默认: {new_name}")
+                    log_img(f"⚠ AI命名失败: {str(e)[:120]}")
             else:
                 new_name = f"{img_page_name or 'image'}-{i+1}.webp"
                 alt = ""
@@ -398,7 +398,7 @@ if run_btn:
                     "placeholder": f"IMAGE_PLACEHOLDER_{i+1}",
                     "file": img_file
                 })
-                log(f"⚠ 图片 {i+1} 识别失败，使用默认命名")
+                log(f"⚠ 图片 {i+1} 识别失败: {str(e)[:120]}")
             progress.progress(int((i+1) / len(image_files) * 35))
 
     # Text optimization
