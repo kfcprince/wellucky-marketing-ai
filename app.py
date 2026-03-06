@@ -353,15 +353,62 @@ if "html_output" in st.session_state:
     st.divider()
     st.success("✅ 处理完成！")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📄 HTML代码", "🖼️ 图片对照表", "🔍 SEO Meta", "🔗 URL & 摘要"])
+    # Contact CTA block (appended to every HTML output)
+    contact_block = """
+<!-- Contact CTA -->
+<div style="background:#1a1a1a;border-radius:12px;padding:40px 24px;text-align:center;margin-top:48px;">
+  <h2 style="color:#ffffff;font-size:1.4rem;margin-bottom:12px;">Request a Quote for Your Project</h2>
+  <p style="color:#cccccc;font-size:14px;max-width:560px;margin:0 auto 24px;">Wellucky provides OEM/ODM services for folding container house camp solutions. Share your headcount, site location, and functional requirements to receive a configuration recommendation and shipping plan.</p>
+  <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+    <a href="https://www.welluckyhouse.com/contact" style="background:#22a06b;color:#fff;padding:12px 28px;border-radius:50px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.05em;">GET A QUOTE</a>
+    <a href="mailto:Info@welluckyhouse.com" style="background:transparent;color:#fff;padding:12px 28px;border-radius:50px;text-decoration:none;font-weight:600;font-size:14px;border:1.5px solid #ffffff;">EMAIL US</a>
+    <a href="https://wa.me/8618615329580" style="background:transparent;color:#fff;padding:12px 28px;border-radius:50px;text-decoration:none;font-weight:600;font-size:14px;border:1.5px solid #ffffff;">WHATSAPP</a>
+  </div>
+</div>"""
+
+    # Full preview HTML wrapper
+    preview_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 860px; margin: 0 auto; padding: 32px 24px; color: #1a1a2e; line-height: 1.7; }}
+  h1 {{ font-size: 2rem; font-weight: 700; margin-bottom: 16px; }}
+  h2 {{ font-size: 1.4rem; font-weight: 600; margin-top: 32px; margin-bottom: 12px; }}
+  h3 {{ font-size: 1.1rem; font-weight: 600; margin-top: 24px; }}
+  p {{ margin-bottom: 16px; }}
+  ul, ol {{ margin-bottom: 16px; padding-left: 24px; }}
+  li {{ margin-bottom: 6px; }}
+  figure {{ margin: 24px 0; }}
+  figure img {{ max-width: 100%; border-radius: 8px; background: #e5e7eb; min-height: 200px; display: block; }}
+  figcaption {{ font-size: 13px; color: #6b7280; margin-top: 6px; text-align: center; }}
+  .faq-section {{ background: #f8f9fb; border-radius: 10px; padding: 24px; margin-top: 32px; }}
+  .faq-section h2 {{ margin-top: 0; }}
+  strong {{ color: #1a1a2e; }}
+</style>
+</head>
+<body>
+{html_output}
+{contact_block}
+</body>
+</html>"""
+
+    html_with_contact = html_output + "\n" + contact_block
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👁️ 预览", "📄 HTML代码", "🖼️ 图片对照表", "🔍 SEO Meta", "🔗 URL & 摘要"])
 
     with tab1:
-        st.caption("复制以下代码，粘贴到CMS源代码编辑框")
-        st.code(html_output, language="html")
-        st.download_button("⬇ 下载HTML", html_output,
-            file_name=f"{seo.get('url_slug', 'output')}.html", mime="text/html")
+        st.caption("以下为页面渲染预览（图片占位符显示为空白，填入真实链接后可完整预览）")
+        st.components.v1.html(preview_html, height=800, scrolling=True)
 
     with tab2:
+        st.caption("复制以下代码，粘贴到CMS源代码编辑框（已包含底部联系栏）")
+        st.code(html_with_contact, language="html")
+        st.download_button("⬇ 下载HTML", html_with_contact,
+            file_name=f"{seo.get('url_slug', 'output')}.html", mime="text/html")
+
+    with tab3:
         if image_results:
             st.caption("上传图片到网站后台后，填入链接，点击「更新HTML」")
             updated_html = html_output
@@ -386,7 +433,7 @@ if "html_output" in st.session_state:
         else:
             st.info("本次未上传图片")
 
-    with tab3:
+    with tab4:
         st.code(f"""<!-- 复制到页面 <head> 中 -->
 <title>{seo.get('title', '')}</title>
 <meta name="description" content="{seo.get('meta_description', '')}">
@@ -395,7 +442,7 @@ if "html_output" in st.session_state:
 <meta property="og:type" content="{'product' if 'page_type_key' in dir() and page_type_key == 'product' else 'article'}">""",
         language="html")
 
-    with tab4:
+    with tab5:
         st.markdown("**URL Slug**")
         st.code(seo.get("url_slug", ""), language="text")
         st.markdown("**Meta Description**")
